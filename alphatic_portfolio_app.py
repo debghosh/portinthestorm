@@ -2024,114 +2024,169 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
 # TAB 1: OVERVIEW
 # =============================================================================
 
+
+# =============================================================================
+# REDESIGNED OVERVIEW TAB - "INVESTING AS COOKING"
+# Replace the existing Overview tab (with tab1:) with this version
+# =============================================================================
+
+
+# =============================================================================
+# COMPLETE OVERVIEW TAB - All Metrics + Cooking Metaphor (Compact)
+# Replace existing tab1 with this version
+# =============================================================================
+
 with tab1:
-    st.markdown(f"## Portfolio: {st.session_state.current_portfolio}")
+    st.markdown("""
+        <div style="text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    border-radius: 15px; color: white; margin-bottom: 1.5rem;">
+            <h1 style="margin: 0; font-size: 2rem;">👨‍🍳 Your Investment Kitchen</h1>
+            <p style="font-size: 1rem; margin-top: 0.3rem; opacity: 0.9;">
+                Goal • Ingredients • Recipe • Timing • Results
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    # Economic Context Banner (Phase 1 OpenBB Feature)
-    st.markdown("---")
-    st.markdown("### 🌡️ Economic Environment")
+    # =============================================================================
+    # SECTION 1: COMPACT KEY INFO (4 columns, tighter spacing)
+    # =============================================================================
     
-    econ_data = get_economic_data_openbb()
+    col1, col2, col3, col4 = st.columns(4)
     
-    if econ_data:
-        # Display economic indicators
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            gdp_status = "✅" if econ_data['gdp_growth'] > 2.0 else ("⚠️" if econ_data['gdp_growth'] > 0 else "🔴")
-            st.metric("GDP Growth", f"{econ_data['gdp_growth']:.1f}%", 
-                     help="Quarterly GDP growth rate (annualized)")
-            st.caption(f"{gdp_status} {'Healthy' if econ_data['gdp_growth'] > 2.0 else 'Weak'}")
-        
-        with col2:
-            unemp_status = "✅" if econ_data['unemployment'] < 4.5 else ("⚠️" if econ_data['unemployment'] < 6.0 else "🔴")
-            st.metric("Unemployment", f"{econ_data['unemployment']:.1f}%",
-                     help="Current unemployment rate")
-            st.caption(f"{unemp_status} {'Low - Good' if econ_data['unemployment'] < 4.5 else 'Rising'}")
-        
-        with col3:
-            inflation_status = "✅" if econ_data['inflation_cpi'] < 3.0 else ("⚠️" if econ_data['inflation_cpi'] < 4.5 else "🔴")
-            st.metric("Inflation (CPI)", f"{econ_data['inflation_cpi']:.1f}%",
-                     help="Year-over-year CPI inflation")
-            st.caption(f"{inflation_status} {'Near Target' if econ_data['inflation_cpi'] < 3.0 else 'Elevated'}")
-        
-        with col4:
-            st.metric("Fed Funds Rate", f"{econ_data['fed_funds_rate']:.2f}%",
-                     help="Current Federal Reserve policy rate")
-            st.caption("💰 Policy Rate")
-        
-        # Economic regime interpretation
-        regime_name, regime_desc = interpret_economic_regime(econ_data)
-        
-        regime_color = {
-            "Goldilocks": "success",
-            "Moderate Growth": "info",
-            "Overheating": "warning",
-            "Stagflation": "error",
-            "Recession": "error"
-        }.get(regime_name, "info")
-        
-        if regime_color == "success":
-            st.success(f"**📊 Economic Regime: {regime_name}**  \n{regime_desc}")
-        elif regime_color == "info":
-            st.info(f"**📊 Economic Regime: {regime_name}**  \n{regime_desc}")
-        elif regime_color == "warning":
-            st.warning(f"**📊 Economic Regime: {regime_name}**  \n{regime_desc}")
-        else:
-            st.error(f"**📊 Economic Regime: {regime_name}**  \n{regime_desc}")
-        
-        # Upcoming economic events
-        upcoming_events = get_upcoming_economic_events()
-        if upcoming_events:
-            st.markdown("#### ⚠️ Upcoming High-Impact Events")
-            events_df = pd.DataFrame([
-                {
-                    'Date': event['date'].strftime('%b %d, %Y'),
-                    'Event': event['event'],
-                    'Impact': event['impact'],
-                    'Description': event['description']
-                }
-                for event in upcoming_events
-            ])
-            st.dataframe(events_df, use_container_width=True, hide_index=True)
-            
-            # Recommendation based on upcoming events
-            days_to_next_event = (upcoming_events[0]['date'] - datetime.now()).days
-            if days_to_next_event <= 7:
-                st.warning(f"💡 **Recommendation:** Major event in {days_to_next_event} days. Consider waiting before making significant portfolio changes.")
+    # Calculate values
+    start_date = pd.to_datetime(current['start_date'])
+    end_date = pd.to_datetime(current['end_date'])
+    days_invested = (end_date - start_date).days
+    years_invested = days_invested / 365.25
+    total_return = metrics['Total Return']
+    final_value = 100000 * (1 + total_return)
+    volatility = metrics['Annual Volatility']
+    sharpe = metrics['Sharpe Ratio']
+    
+    # Overall quality
+    if sharpe > 1.5:
+        quality = "Excellent"
+        quality_emoji = "⭐⭐⭐⭐⭐"
+        quality_color = "#28a745"
+    elif sharpe > 1.0:
+        quality = "Very Good"
+        quality_emoji = "⭐⭐⭐⭐"
+        quality_color = "#20c997"
+    elif sharpe > 0.5:
+        quality = "Good"
+        quality_emoji = "⭐⭐⭐"
+        quality_color = "#ffc107"
+    elif sharpe > 0:
+        quality = "Fair"
+        quality_emoji = "⭐⭐"
+        quality_color = "#fd7e14"
     else:
-        st.info("**🌡️ Economic Context:** Install OpenBB for real-time economic indicators (GDP, inflation, Fed rates, etc.)")
+        quality = "Needs Work"
+        quality_emoji = "⭐"
+        quality_color = "#dc3545"
     
-    st.markdown("---")
-    
-    # Total Return Info Box
-    st.info("""
-        **📊 Total Return Analysis:** All returns shown include dividends reinvested and are adjusted for stock splits. 
-        This represents the actual performance you would achieve with a buy-and-hold strategy that reinvests all dividends.
-    """)
-    
-    # Portfolio Composition
-    st.markdown("### 📦 Portfolio Composition")
-    col1, col2 = st.columns(2)
+    # Risk profile
+    if volatility < 0.10:
+        risk_profile = "Conservative"
+        risk_emoji = "🛡️"
+        risk_color = "#28a745"
+    elif volatility < 0.15:
+        risk_profile = "Moderate"
+        risk_emoji = "🎯"
+        risk_color = "#ffc107"
+    elif volatility < 0.20:
+        risk_profile = "Aggressive"
+        risk_emoji = "🚀"
+        risk_color = "#fd7e14"
+    else:
+        risk_profile = "Very Aggressive"
+        risk_emoji = "⚡"
+        risk_color = "#dc3545"
     
     with col1:
-        # Show tickers and weights
-        # Calculate signals for each ticker
-        signals_list = []
+        st.markdown(f"""
+            <div style="background: {quality_color}; color: white; padding: 0.8rem; border-radius: 8px; text-align: center;">
+                <h5 style="margin: 0; font-size: 0.8rem; opacity: 0.9;">Quality</h5>
+                <h3 style="margin: 0.2rem 0; font-size: 1.2rem;">{quality_emoji}</h3>
+                <p style="margin: 0; font-size: 0.85rem; font-weight: bold;">{quality}</p>
+                <p style="margin: 0; font-size: 0.7rem; opacity: 0.9;">Sharpe: {sharpe:.2f}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; border-left: 4px solid #667eea;">
+                <h5 style="margin: 0; font-size: 0.8rem; color: #666;">⏱️ Time Period</h5>
+                <h3 style="margin: 0.2rem 0; color: #667eea; font-size: 1.3rem;">{years_invested:.1f} yrs</h3>
+                <p style="margin: 0; font-size: 0.75rem; color: #888;">{start_date.strftime('%b %Y')} → {end_date.strftime('%b %Y')}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; border-left: 4px solid #28a745;">
+                <h5 style="margin: 0; font-size: 0.8rem; color: #666;">💰 $100k Grows To</h5>
+                <h3 style="margin: 0.2rem 0; color: #28a745; font-size: 1.3rem;">${final_value:,.0f}</h3>
+                <p style="margin: 0; font-size: 0.75rem; color: #888;">{metrics['Annual Return']*100:.1f}% annual</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(f"""
+            <div style="background: {risk_color}; color: white; padding: 0.8rem; border-radius: 8px; text-align: center;">
+                <h5 style="margin: 0; font-size: 0.8rem; opacity: 0.9;">Risk Level</h5>
+                <h3 style="margin: 0.2rem 0; font-size: 1.5rem;">{risk_emoji}</h3>
+                <p style="margin: 0; font-size: 0.85rem; font-weight: bold;">{risk_profile}</p>
+                <p style="margin: 0; font-size: 0.7rem; opacity: 0.9;">{volatility*100:.1f}% vol</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # =============================================================================
+    # SECTION 2: PORTFOLIO COMPOSITION
+    # =============================================================================
+    st.markdown("## 🥘 Your Ingredients")
+    
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        # Build enhanced composition table
+        ingredients_data = []
         for ticker in weights.keys():
+            weight = weights[ticker]
+            
             if ticker in prices.columns:
                 signal_data = generate_trading_signal(prices[ticker])
-                signals_list.append(signal_data['action'])
-            else:
-                signals_list.append('N/A')
+                action = signal_data['action']
+                
+                ticker_returns = prices[ticker].pct_change().dropna()
+                ticker_annual_return = (1 + ticker_returns.mean()) ** 252 - 1
+                
+                # Categorize
+                if ticker in ['SPY', 'VTI', 'QQQ', 'VOO', 'VUG']:
+                    ingredient_type = "🥩 Core"
+                elif ticker in ['AGG', 'BND', 'TLT', 'IEF', 'SHY']:
+                    ingredient_type = "🥗 Bonds"
+                elif ticker in ['VEA', 'VWO', 'EFA', 'IEMG', 'VXUS']:
+                    ingredient_type = "🌶️ Intl"
+                elif ticker in ['GLD', 'IAU']:
+                    ingredient_type = "🧂 Gold"
+                elif ticker in ['VYM', 'SCHD', 'DVY']:
+                    ingredient_type = "💰 Dividend"
+                else:
+                    ingredient_type = "🥄 Other"
+                
+                ingredients_data.append({
+                    'Ticker': ticker,
+                    'Type': ingredient_type,
+                    'Weight': f"{weight*100:.1f}%",
+                    'Return': f"{ticker_annual_return*100:+.1f}%",
+                    'Action': action
+                })
         
-        comp_df = pd.DataFrame({
-            'Ticker': list(weights.keys()),
-            'Weight': [f"{w*100:.2f}%" for w in weights.values()],
-            'Accumulate/Distribute': signals_list
-        })
+        ingredients_df = pd.DataFrame(ingredients_data)
         
-        # Style the Accumulate/Distribute column
         def style_action(val):
             if val == 'Accumulate':
                 return 'background-color: #d4edda; color: #155724; font-weight: bold'
@@ -2141,23 +2196,53 @@ with tab1:
                 return 'background-color: #fff3cd; color: #856404; font-weight: bold'
             return ''
         
-        styled_df = comp_df.style.applymap(style_action, subset=['Accumulate/Distribute'])
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        styled_ingredients = ingredients_df.style.applymap(style_action, subset=['Action'])
+        st.dataframe(styled_ingredients, use_container_width=True, hide_index=True)
+
+        # Ingredient Guide
+        with st.expander("🧾 Ingredient Guide - What Each Type Does"):
+            st.markdown("""
+            **🥩 Main Course (Core Growth)** - Large-cap stocks (SPY, VTI, QQQ)  
+            → Provides primary growth. Like the protein in your meal.
+            
+            **🥗 Stabilizer (Bonds)** - Fixed income (AGG, BND, TLT)  
+            → Reduces volatility, provides steady income. Like vegetables that balance the meal.
+            
+            **🌶️ Spice (International)** - Foreign stocks (VEA, VWO, EFA)  
+            → Adds diversification and growth from other economies. Enhances flavor.
+            
+            **🧂 Preservative (Gold)** - Precious metals (GLD, IAU)  
+            → Inflation hedge, crisis insurance. Preserves value when market sours.
+            
+            **🥄 Specialty** - Sector-specific or thematic ETFs  
+            → Targeted exposure to specific themes. Special seasoning.
+            """)
     
     with col2:
-        # Pie chart
-        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # st.markdown("### 🥧 Ingredient Proportions")
+
+        fig, ax = plt.subplots(figsize=(6, 6))
         colors = plt.cm.Set3(range(len(weights)))
-        ax.pie(weights.values(), labels=weights.keys(), autopct='%1.1f%%',
-               colors=colors, startangle=90)
-        ax.set_title('Portfolio Allocation', fontsize=14, fontweight='bold', pad=20)
+        wedges, texts, autotexts = ax.pie(
+            weights.values(), 
+            labels=weights.keys(), 
+            autopct='%1.1f%%',
+            colors=colors, 
+            startangle=90,
+            textprops={'fontsize': 9}
+        )
+        ax.set_title('### 🥧 Ingredient Proportions', fontsize=12, fontweight='bold', pad=10)
         st.pyplot(fig)
     
-    # Key Metrics
     st.markdown("---")
-    st.markdown("### 🎯 Key Performance Metrics vs S&P 500")
     
-    # Calculate SPY metrics for comparison
+    # =============================================================================
+    # SECTION 3: ALL PERFORMANCE METRICS
+    # =============================================================================
+    st.markdown("### 🎯 Performance Metrics vs S&P 500")
+    
+    # Calculate SPY
     try:
         spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
         if spy_data is not None:
@@ -2168,31 +2253,25 @@ with tab1:
     except:
         spy_metrics = None
     
-    # Helper function to get comparison arrow and color
     def get_comparison_indicator(portfolio_value, spy_value, metric_type='higher_better'):
-        """
-        Returns arrow emoji and color based on comparison
-        metric_type: 'higher_better' or 'lower_better'
-        """
         if spy_metrics is None:
             return "", "white"
-        
         if metric_type == 'higher_better':
             if portfolio_value > spy_value:
-                return "🟢 ↑", "#28a745"  # Green up arrow
+                return "🟢", "#28a745"
             elif portfolio_value < spy_value:
-                return "🔴 ↓", "#dc3545"  # Red down arrow
+                return "🔴", "#dc3545"
             else:
-                return "⚪ →", "#ffc107"  # Yellow equal
-        else:  # lower_better (for volatility, drawdown)
+                return "⚪", "#ffc107"
+        else:
             if portfolio_value < spy_value:
-                return "🟢 ↑", "#28a745"  # Green up arrow (lower is better)
+                return "🟢", "#28a745"
             elif portfolio_value > spy_value:
-                return "🔴 ↓", "#dc3545"  # Red down arrow (higher is worse)
+                return "🔴", "#dc3545"
             else:
-                return "⚪ →", "#ffc107"  # Yellow equal
+                return "⚪", "#ffc107"
     
-    # First row of metrics
+    # First row: Core metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -2251,20 +2330,8 @@ with tab1:
         """, unsafe_allow_html=True)
         render_metric_explanation('volatility')
     
-    # Add comparison legend
-    st.markdown("""
-        <div style="text-align: center; padding: 10px; margin-top: 10px; background: #f8f9fa; border-radius: 5px;">
-            <small>
-                <strong>Comparison Legend:</strong>  
-                🟢 ↑ = Your portfolio is BETTER than S&P 500  |  
-                🔴 ↓ = Your portfolio is WORSE than S&P 500  |  
-                ⚪ → = Equal performance
-            </small>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Additional metrics
-    st.markdown("---")
+    # Second row: Additional metrics
+    st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -2321,22 +2388,25 @@ with tab1:
             </div>
         """, unsafe_allow_html=True)
     
+    # Legend
+    st.markdown("""
+        <div style="text-align: center; padding: 8px; margin-top: 8px; background: #f8f9fa; border-radius: 5px;">
+            <small><strong>Legend:</strong> 🟢 = Better | 🔴 = Worse | ⚪ = Equal vs SPY</small>
+        </div>
+    """, unsafe_allow_html=True)
+    
     # Performance Chart
     st.markdown("---")
     st.markdown("### 📈 Performance Over Time")
     fig = plot_cumulative_returns(portfolio_returns, f'{st.session_state.current_portfolio} - Cumulative Returns')
     st.pyplot(fig)
     
-    # Chart interpretation
     st.markdown("""
         <div class="interpretation-box">
             <div class="interpretation-title">💡 What This Chart Means</div>
-            <p><strong>How to Read:</strong> This shows how $1 invested at the start grows over time. 
-            A value of 1.5 means your investment grew 50%.</p>
-            <p><strong>Look For:</strong> Steady upward trend = good. Sharp drops = drawdowns. 
-            Flat periods = your money isn't working for you.</p>
-            <p><strong>Action Item:</strong> If the line trends down over 6+ months, consider rebalancing 
-            or reviewing your strategy.</p>
+            <p><strong>How to Read:</strong> Shows how $1 grows over time. Value of 1.5 = 50% gain.</p>
+            <p><strong>Look For:</strong> Steady upward = good. Sharp drops = drawdowns. Flat = stagnation.</p>
+            <p><strong>Action:</strong> 6+ months downtrend = review strategy.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -2346,18 +2416,14 @@ with tab1:
     fig = plot_drawdown(portfolio_returns, 'Portfolio Drawdown')
     st.pyplot(fig)
     
-    # Drawdown interpretation
     st.markdown("""
         <div class="interpretation-box">
             <div class="interpretation-title">💡 Understanding Drawdowns</div>
-            <p><strong>What This Shows:</strong> How much you're "underwater" from your peak value at any point in time.</p>
-            <p><strong>Red Flag:</strong> If drawdown exceeds -20%, you're in bear market territory. 
-            Don't panic-sell! History shows markets recover.</p>
-            <p><strong>Psychology Check:</strong> Look at the deepest drawdown. Can you handle losing that much 
-            without selling? If not, consider a less volatile allocation.</p>
+            <p><strong>What This Shows:</strong> How much underwater from peak value.</p>
+            <p><strong>Red Flag:</strong> >20% drawdown = bear market. Don't panic-sell!</p>
+            <p><strong>Psychology Check:</strong> Can you handle the max drawdown without selling?</p>
         </div>
     """, unsafe_allow_html=True)
-
 
 # =============================================================================
 # TAB 2: DETAILED ANALYSIS
