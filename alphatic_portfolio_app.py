@@ -90,11 +90,57 @@ def calculate_support_resistance(prices, window=20):
         'recent_low': rolling_low.iloc[-1]
     }
 
-def generate_trading_signal(prices):
+# =============================================================================
+# FIXED TRADING SIGNAL GENERATION - Internally Consistent
+# Replace the generate_trading_signal function (around line 93-197)
+# =============================================================================
+
+# =============================================================================
+# FINAL COMPLETE FIX - Trading Signals
+# =============================================================================
+# This file contains:
+# 1. Updated function signature to accept ticker explicitly
+# 2. Bond detection logic
+# 3. Fixed signal display (returns list, not string)
+# 4. More conservative thresholds
+# =============================================================================
+
+# =============================================================================
+# FIXED SCORING LOGIC - Stays Within -6 to +6 Range
+# Replace the entire generate_trading_signal function (lines 93-197)
+# =============================================================================
+
+def generate_trading_signal(prices, ticker=None):
     """
-    Generate comprehensive trading signal with confidence
+    Generate trading signal with proper scoring that stays within -6 to +6 range
+    
+    Scoring System (Maximum ±6):
+    - Trend: ±3 points (most important)
+    - Momentum: ±2 points (confirms trend)
+    - Extremes: ±1 point (timing)
+    Total: -6 to +6
     """
-    # Calculate indicators
+    
+    # Get ticker from parameter or series name
+    if ticker is None:
+        ticker = prices.name if hasattr(prices, 'name') and prices.name else 'Unknown'
+    
+    ticker = str(ticker).upper()
+    
+    # =============================================================================
+    # BOND ETF DETECTION
+    # =============================================================================
+    
+    BOND_ETFS = ['AGG', 'BND', 'TLT', 'IEF', 'SHY', 'TIP', 'LQD', 'MUB', 
+                 'HYG', 'JNK', 'VCIT', 'VCSH', 'BIV', 'BSV', 'VGIT', 'VGSH']
+    
+    if ticker in BOND_ETFS:
+        return generate_bond_signal(prices, ticker)
+    
+    # =============================================================================
+    # CALCULATE INDICATORS
+    # =============================================================================
+    
     rsi = calculate_rsi(prices)
     macd, macd_signal, macd_hist = calculate_macd(prices)
     bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(prices)
@@ -109,92 +155,470 @@ def generate_trading_signal(prices):
     current_macd_hist = macd_hist.iloc[-1]
     prev_macd_hist = macd_hist.iloc[-2] if len(macd_hist) > 1 else 0
     
-    # Scoring system
-    score = 0
-    signals = []
+    # =============================================================================
+    # SCORING COMPONENT 1: TREND (Maximum ±3 points)
+    # =============================================================================
     
-    # RSI signals
-    if current_rsi < 30:
-        score += 2
-        signals.append("RSI Oversold (Bullish)")
-    elif current_rsi > 70:
-        score -= 2
-        signals.append("RSI Overbought (Bearish)")
-    elif current_rsi < 40:
-        score += 1
-        signals.append("RSI Bullish Lean")
-    elif current_rsi > 60:
-        score -= 1
-        signals.append("RSI Bearish Lean")
+    trend_score = 0
+    trend_signals = []
+    trend_computation = []
     
-    # MACD signals
-    if current_macd > current_macd_signal and prev_macd_hist < 0 < current_macd_hist:
-        score += 2
-        signals.append("MACD Bullish Crossover")
-    elif current_macd < current_macd_signal and prev_macd_hist > 0 > current_macd_hist:
-        score -= 2
-        signals.append("MACD Bearish Crossover")
-    elif current_macd > current_macd_signal:
-        score += 1
-        signals.append("MACD Bullish")
-    else:
-        score -= 1
-        signals.append("MACD Bearish")
-    
-    # Trend signals
     if not pd.isna(sma_50.iloc[-1]) and not pd.isna(sma_200.iloc[-1]):
-        if current_price > sma_50.iloc[-1] > sma_200.iloc[-1]:
-            score += 2
-            signals.append("Strong Uptrend")
-        elif current_price < sma_50.iloc[-1] < sma_200.iloc[-1]:
-            score -= 2
-            signals.append("Strong Downtrend")
-        elif current_price > sma_200.iloc[-1]:
-            score += 1
-            signals.append("Above 200 SMA")
+        price_above_50 = current_price > sma_50.iloc[-1]
+        price_above_200 = current_price > sma_200.iloc[-1]
+        sma50_above_200 = sma_50.iloc[-1] > sma_200.iloc[-1]
+        
+        if price_above_50 and price_above_200 and sma50_above_200:
+            trend_score = 3
+            trend_signals.append("Price > 50 SMA > 200 SMA (Strong Uptrend)")
+            trend_computation.append("Trend: Price > 50 SMA > 200 SMA = +3 points")
+        elif price_above_200:
+            trend_score = 2
+            trend_signals.append("Price above 200 SMA (Uptrend)")
+            trend_computation.append("Trend: Price > 200 SMA = +2 points")
+        elif not price_above_50 and not price_above_200 and not sma50_above_200:
+            trend_score = -3
+            trend_signals.append("Price < 50 SMA < 200 SMA (Strong Downtrend)")
+            trend_computation.append("Trend: Price < 50 SMA < 200 SMA = -3 points")
+        elif not price_above_200:
+            trend_score = -2
+            trend_signals.append("Price below 200 SMA (Downtrend)")
+            trend_computation.append("Trend: Price < 200 SMA = -2 points")
         else:
-            score -= 1
-            signals.append("Below 200 SMA")
+            trend_score = 0
+            trend_signals.append("Mixed trend signals")
+            trend_computation.append("Trend: Mixed signals = 0 points")
+    else:
+        trend_signals.append("Insufficient data for trend")
+        trend_computation.append("Trend: Insufficient data = 0 points")
     
-    # Bollinger Band signals
+    # =============================================================================
+    # SCORING COMPONENT 2: MOMENTUM (Maximum ±2 points)
+    # =============================================================================
+    
+    momentum_score = 0
+    momentum_signals = []
+    momentum_computation = []
+    
+    macd_bullish = current_macd > current_macd_signal
+    
+    if current_macd > current_macd_signal and prev_macd_hist < 0 < current_macd_hist:
+        momentum_score = 2
+        momentum_signals.append("MACD bullish crossover")
+        momentum_computation.append("Momentum: MACD bullish crossover = +2 points")
+    elif current_macd < current_macd_signal and prev_macd_hist > 0 > current_macd_hist:
+        momentum_score = -2
+        momentum_signals.append("MACD bearish crossover")
+        momentum_computation.append("Momentum: MACD bearish crossover = -2 points")
+    elif macd_bullish:
+        momentum_score = 1
+        momentum_signals.append("MACD bullish")
+        momentum_computation.append("Momentum: MACD bullish = +1 point")
+    else:
+        momentum_score = -1
+        momentum_signals.append("MACD bearish")
+        momentum_computation.append("Momentum: MACD bearish = -1 point")
+    
+    # =============================================================================
+    # SCORING COMPONENT 3: EXTREMES (Maximum ±1 point)
+    # =============================================================================
+    
+    extreme_score = 0
+    extreme_signals = []
+    extreme_computation = []
+    
+    # RSI component (max ±0.5)
+    if current_rsi < 30:
+        rsi_component = 0.5
+        extreme_signals.append(f"RSI oversold ({current_rsi:.1f})")
+        extreme_computation.append(f"RSI: {current_rsi:.1f} < 30 (oversold) = +0.5 points")
+    elif current_rsi > 70:
+        rsi_component = -0.5
+        extreme_signals.append(f"RSI overbought ({current_rsi:.1f})")
+        extreme_computation.append(f"RSI: {current_rsi:.1f} > 70 (overbought) = -0.5 points")
+    elif current_rsi < 40:
+        rsi_component = 0.25
+        extreme_signals.append(f"RSI bullish lean ({current_rsi:.1f})")
+        extreme_computation.append(f"RSI: {current_rsi:.1f} < 40 = +0.25 points")
+    elif current_rsi > 60:
+        rsi_component = -0.25
+        extreme_signals.append(f"RSI bearish lean ({current_rsi:.1f})")
+        extreme_computation.append(f"RSI: {current_rsi:.1f} > 60 = -0.25 points")
+    else:
+        rsi_component = 0
+        extreme_signals.append(f"RSI neutral ({current_rsi:.1f})")
+        extreme_computation.append(f"RSI: {current_rsi:.1f} (neutral) = 0 points")
+    
+    extreme_score += rsi_component
+    
+    # Bollinger Band component (max ±0.5)
     if current_price < bb_lower.iloc[-1]:
-        score += 1
-        signals.append("Below Lower BB")
+        bb_component = 0.5
+        extreme_signals.append("Price below lower Bollinger Band")
+        extreme_computation.append("Bollinger: Below lower band = +0.5 points")
     elif current_price > bb_upper.iloc[-1]:
-        score -= 1
-        signals.append("Above Upper BB")
+        bb_component = -0.5
+        extreme_signals.append("Price above upper Bollinger Band")
+        extreme_computation.append("Bollinger: Above upper band = -0.5 points")
+    else:
+        bb_component = 0
+        extreme_computation.append("Bollinger: Within bands = 0 points")
     
-    # Determine overall signal
-    if score >= 4:
+    extreme_score += bb_component
+    
+    # =============================================================================
+    # TOTAL SCORE (Sum of all components: -6 to +6)
+    # =============================================================================
+    
+    total_score = trend_score + momentum_score + extreme_score
+    
+    # Build computation breakdown
+    score_breakdown = {
+        'trend': trend_score,
+        'momentum': momentum_score,
+        'extremes': round(extreme_score, 2),
+        'total': round(total_score, 2),
+        'computation': trend_computation + momentum_computation + extreme_computation,
+        'formula': f"Total = Trend({trend_score}) + Momentum({momentum_score}) + Extremes({extreme_score:.2f}) = {total_score:.2f}"
+    }
+    
+    # =============================================================================
+    # DETERMINE SIGNAL BASED ON SCORE
+    # =============================================================================
+    
+    if total_score >= 4:
         signal = "STRONG BUY"
         action = "Accumulate"
-    elif score >= 2:
+    elif total_score >= 2:
         signal = "BUY"
         action = "Accumulate"
-    elif score <= -4:
+    elif total_score >= 0.5:
+        signal = "HOLD (Bullish)"
+        action = "Hold"
+    elif total_score <= -4:
         signal = "STRONG SELL"
         action = "Distribute"
-    elif score <= -2:
+    elif total_score <= -2:
         signal = "SELL"
         action = "Distribute"
+    elif total_score <= -0.5:
+        signal = "HOLD (Bearish)"
+        action = "Hold"
     else:
         signal = "HOLD"
         action = "Hold"
     
-    confidence = min(abs(score) * 15, 100)
+    # =============================================================================
+    # CALCULATE CONFIDENCE (0-100%)
+    # =============================================================================
+    
+    # Confidence based on:
+    # 1. Score magnitude (stronger signal = higher confidence)
+    # 2. Agreement between components (all bullish/bearish = higher confidence)
+    
+    # Base confidence from score magnitude
+    base_confidence = min(abs(total_score) * 15, 100)
+    
+    # Agreement bonus: if all components point same direction
+    components = [trend_score, momentum_score, extreme_score]
+    all_positive = all(c > 0 for c in components if c != 0)
+    all_negative = all(c < 0 for c in components if c != 0)
+    
+    if all_positive or all_negative:
+        agreement_bonus = 10
+    else:
+        agreement_bonus = 0
+    
+    confidence = min(base_confidence + agreement_bonus, 100)
+    
+    confidence_breakdown = {
+        'base': base_confidence,
+        'agreement_bonus': agreement_bonus,
+        'total': confidence,
+        'formula': f"Confidence = min(|Score| × 15, 100) + Agreement Bonus = {base_confidence:.0f}% + {agreement_bonus}% = {confidence:.0f}%"
+    }
+    
+    # Combine all signals
+    all_signals = trend_signals + momentum_signals + extreme_signals
+    
+    # =============================================================================
+    # RETURN RESULTS
+    # =============================================================================
     
     return {
         'signal': signal,
         'action': action,
-        'score': score,
+        'score': round(total_score, 1),
+        'score_breakdown': score_breakdown,
         'confidence': confidence,
-        'signals': signals,
+        'confidence_breakdown': confidence_breakdown,
+        'signals': all_signals,
         'rsi': current_rsi,
         'macd': current_macd,
         'macd_signal': current_macd_signal,
         'price_vs_sma50': ((current_price / sma_50.iloc[-1]) - 1) * 100 if not pd.isna(sma_50.iloc[-1]) else None,
         'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
     }
+
+
+# =============================================================================
+# BOND SIGNAL FUNCTION (Unchanged but included for completeness)
+# =============================================================================
+
+def generate_bond_signal(prices, ticker):
+    """Bond-specific logic (scores don't apply)"""
+    
+    sma_200 = calculate_sma(prices, 200)
+    current_price = prices.iloc[-1]
+    
+    if len(prices) >= 60:
+        recent_60d_return = (current_price / prices.iloc[-60] - 1) * 100
+    else:
+        recent_60d_return = 0
+    
+    signals_list = []
+    
+    # Bond type
+    if ticker in ['AGG', 'BND']:
+        signals_list.append("Aggregate Bond - diversified bonds")
+    elif ticker in ['TLT', 'IEF']:
+        signals_list.append("Treasury Bond - government backed")
+    elif ticker in ['HYG', 'JNK']:
+        signals_list.append("High Yield - higher risk/return")
+    else:
+        signals_list.append(f"{ticker} - bond fund")
+    
+    # Price vs 200 SMA
+    if not pd.isna(sma_200.iloc[-1]):
+        if current_price > sma_200.iloc[-1]:
+            signals_list.append("Price above 200-day average")
+        else:
+            signals_list.append("Price below 200-day average")
+    
+    # Recent performance
+    if abs(recent_60d_return) < 2:
+        signals_list.append("Flat recent performance")
+    else:
+        signals_list.append(f"{'Up' if recent_60d_return > 0 else 'Down'} {abs(recent_60d_return):.1f}% over 60 days")
+    
+    # Bond recommendation
+    if ticker in ['AGG', 'BND']:
+        signal = "HOLD"
+        confidence = 60
+        recommendation = "Hold for diversification. Bonds are portfolio ballast."
+    elif ticker in ['TLT', 'IEF']:
+        signal = "HOLD"
+        confidence = 55
+        recommendation = "Hold for rate hedge. Monitor Fed policy."
+    elif ticker in ['HYG', 'JNK']:
+        if recent_60d_return > 3:
+            signal = "BUY"
+            confidence = 65
+        elif recent_60d_return < -3:
+            signal = "SELL"
+            confidence = 70
+        else:
+            signal = "HOLD"
+            confidence = 55
+        recommendation = "High yield behaves like stocks. Monitor credit spreads."
+    else:
+        signal = "HOLD"
+        confidence = 60
+        recommendation = "Hold for bond allocation."
+    
+    return {
+        'signal': signal,
+        'action': 'Hold' if signal == 'HOLD' else 'Accumulate' if signal == 'BUY' else 'Distribute',
+        'score': 0,
+        'score_breakdown': {'formula': 'Bonds use different logic (not scored)'},
+        'confidence': confidence,
+        'confidence_breakdown': {'formula': 'Based on bond-specific factors'},
+        'signals': signals_list,
+        'rsi': None,
+        'macd': None,
+        'macd_signal': None,
+        'price_vs_sma50': None,
+        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
+    }
+
+def generate_bond_signal(prices, ticker):
+    """
+    Special logic for bond ETFs - bonds are NOT stocks!
+    """
+    
+    # Calculate simple indicators
+    sma_50 = calculate_sma(prices, 50)
+    sma_200 = calculate_sma(prices, 200)
+    current_price = prices.iloc[-1]
+    
+    # Recent performance
+    if len(prices) >= 60:
+        recent_60d_return = (current_price / prices.iloc[-60] - 1) * 100
+    else:
+        recent_60d_return = 0
+    
+    # Initialize signals list (LIST, not string!)
+    signals_list = []
+    
+    # Bond type classification
+    if ticker in ['TLT', 'IEF', 'TLH']:
+        bond_type = "Long-term Treasury"
+        signals_list.append(f"{bond_type} - sensitive to interest rates")
+    elif ticker in ['SHY', 'VCSH', 'BSV', 'VGSH']:
+        bond_type = "Short-term"
+        signals_list.append(f"{bond_type} - minimal rate risk")
+    elif ticker in ['LQD', 'VCIT', 'BIV']:
+        bond_type = "Investment Grade Corporate"
+        signals_list.append(f"{bond_type} - credit + rate risk")
+    elif ticker in ['HYG', 'JNK']:
+        bond_type = "High Yield"
+        signals_list.append(f"{bond_type} - acts like stocks")
+    elif ticker in ['TIP']:
+        bond_type = "Inflation Protected"
+        signals_list.append(f"{bond_type} - inflation hedge")
+    elif ticker in ['MUB']:
+        bond_type = "Municipal"
+        signals_list.append(f"{bond_type} - tax-advantaged")
+    else:
+        bond_type = "Aggregate Bond"
+        signals_list.append(f"{bond_type} - diversified bonds")
+    
+    # Trend check
+    if not pd.isna(sma_200.iloc[-1]):
+        if current_price > sma_200.iloc[-1]:
+            signals_list.append("Price above 200-day average")
+            trend_positive = True
+        else:
+            signals_list.append("Price below 200-day average")
+            trend_positive = False
+    else:
+        trend_positive = None
+    
+    # Recent performance
+    if recent_60d_return > 2:
+        signals_list.append(f"Up {recent_60d_return:.1f}% over 60 days")
+    elif recent_60d_return < -2:
+        signals_list.append(f"Down {abs(recent_60d_return):.1f}% over 60 days")
+    else:
+        signals_list.append("Flat recent performance")
+    
+    # =============================================================================
+    # BOND-SPECIFIC RECOMMENDATIONS
+    # =============================================================================
+    
+    # AGG/BND - Always HOLD for diversification
+    if ticker in ['AGG', 'BND']:
+        signal = "HOLD"
+        action = "Hold"
+        confidence = 60
+        recommendation = "Hold for diversification. Bonds are portfolio ballast."
+        actionable_notes = [
+            "AGG/BND are diversifiers, not trading vehicles",
+            "Hold 20-40% bonds based on risk tolerance",
+            "Rebalance when allocation drifts"
+        ]
+    
+    # TLT/IEF - Tactical based on rates
+    elif ticker in ['TLT', 'IEF']:
+        if trend_positive and recent_60d_return > 3:
+            signal = "BUY"
+            action = "Accumulate"
+            confidence = 70
+            recommendation = "Rates falling = bond prices rising. Tactical buy."
+            actionable_notes = [
+                "Long bonds benefit from rate cuts",
+                "High duration = high volatility",
+                "Use 10-15% max allocation"
+            ]
+        elif trend_positive:
+            signal = "HOLD"
+            action = "Hold"
+            confidence = 60
+            recommendation = "Hold current allocation. Monitor rates."
+            actionable_notes = ["Long bonds are rate hedges", "Use cautiously"]
+        else:
+            signal = "HOLD"
+            action = "Hold"
+            confidence = 50
+            recommendation = "Neutral. Wait for clearer rate trend."
+            actionable_notes = ["TLT is tactical, not core"]
+    
+    # SHY - Always hold (cash alternative)
+    elif ticker in ['SHY', 'VCSH', 'BSV', 'VGSH']:
+        signal = "HOLD"
+        action = "Hold"
+        confidence = 65
+        recommendation = "Hold for stability. Short bonds = cash alternative."
+        actionable_notes = [
+            "Short bonds have minimal volatility",
+            "Good when rates rising",
+            "Use as cash substitute"
+        ]
+    
+    # HYG/JNK - Treat more like stocks
+    elif ticker in ['HYG', 'JNK']:
+        if trend_positive and recent_60d_return > 3:
+            signal = "BUY"
+            action = "Accumulate"
+            confidence = 65
+            recommendation = "High yield strong. Credit spreads tightening."
+            actionable_notes = [
+                "High yield behaves like stocks",
+                "Use in risk-on environments",
+                "5-10% max allocation"
+            ]
+        elif not trend_positive:
+            signal = "SELL"
+            action = "Distribute"
+            confidence = 70
+            recommendation = "High yield weakness = recession risk."
+            actionable_notes = [
+                "HYG/JNK sell off in recessions",
+                "Switch to quality in stress"
+            ]
+        else:
+            signal = "HOLD"
+            action = "Hold"
+            confidence = 55
+            recommendation = "Neutral. Monitor economic data."
+            actionable_notes = ["High yield for income, not safety"]
+    
+    # TIP - Hold for inflation protection
+    elif ticker == 'TIP':
+        signal = "HOLD"
+        action = "Hold"
+        confidence = 60
+        recommendation = "Hold for inflation protection."
+        actionable_notes = [
+            "TIP adjusts for inflation",
+            "Use 10-15% if inflation concerns",
+            "Real yield protection"
+        ]
+    
+    # Default for other bonds
+    else:
+        signal = "HOLD"
+        action = "Hold"
+        confidence = 60
+        recommendation = "Hold for diversification."
+        actionable_notes = ["Bonds stabilize portfolios"]
+    
+    return {
+        'signal': signal,
+        'action': action,
+        'score': 0,
+        'confidence': confidence,
+        'trend_direction': 'N/A (Bond)',
+        'signals': signals_list,  # THIS IS A LIST!
+        'recommendation': recommendation,
+        'actionable_notes': actionable_notes,
+        'rsi': None,
+        'macd': None,
+        'macd_signal': None,
+        'price_vs_sma50': None,
+        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
+    }
+
 
 def detect_market_regime_enhanced(returns, prices):
     """
@@ -1799,6 +2223,48 @@ def plot_efficient_frontier(results, optimal_weights, portfolio_return, portfoli
 st.sidebar.markdown("## 📊 Alphatic Portfolio Analyzer ✨")
 st.sidebar.markdown("---")
 
+# =============================================================================
+# SIDEBAR ETF UNIVERSE HELPER
+# Add this BEFORE the "Build Portfolio" section in sidebar (around line 1800)
+# =============================================================================
+
+st.sidebar.markdown("### 📚 ETF Universe")
+
+with st.sidebar.expander("Quick ETF Reference"):
+    st.markdown("""
+        **🏢 Core Market:**
+        - SPY, VOO, IVV (S&P 500)
+        - VTI, ITOT (Total Market)
+        
+        **🚀 Growth/Tech:**
+        - QQQ (Nasdaq-100)
+        - VUG, VGT (Growth, Tech)
+        
+        **💰 Dividend:**
+        - SCHD, VIG, VYM, DGRO
+        
+        **🛡️ Bonds:**
+        - AGG, BND (Aggregate)
+        - TLT (Long-term)
+        - SHY (Short-term)
+        - TIP (Inflation)
+        
+        **🌍 International:**
+        - VEA (Developed)
+        - VWO (Emerging)
+        - VXUS (Total Intl)
+        
+        **🎯 Factors:**
+        - QUAL (Quality)
+        - MTUM (Momentum)
+        - VTV (Value)
+        - USMV (Low Vol)
+        
+        **💡 Tip:** Click "Portfolio Education" tab for detailed analysis!
+    """)
+
+st.sidebar.markdown("---")
+
 # Portfolio Builder Section
 st.sidebar.markdown("### 🔨 Build Portfolio")
 
@@ -1967,48 +2433,13 @@ if st.session_state.portfolios:
 st.markdown('<h1 class="main-header">Alphatic Portfolio Analyzer ✨</h1>', unsafe_allow_html=True)
 st.markdown('<p class="tagline">Sophisticated analysis for the educated investor</p>', unsafe_allow_html=True)
 
-# Check if portfolio exists
-if not st.session_state.current_portfolio:
-    st.markdown("""
-        <div class="info-box">
-            <h3>👋 Welcome to Alphatic Portfolio Analyzer!</h3>
-            <p style="font-size: 1.1rem;">
-                Get started by building your first portfolio using the sidebar on the left.
-            </p>
-            <p><strong>Features:</strong></p>
-            <ul>
-                <li>📊 Comprehensive portfolio analysis with detailed metrics</li>
-                <li>🎯 Portfolio optimization (Maximum Sharpe Ratio)</li>
-                <li>📈 PyFolio integration for professional-grade analytics</li>
-                <li>🌡️ <strong>NEW:</strong> Market regime analysis across 5 conditions</li>
-                <li>🔮 <strong>NEW:</strong> Forward-looking risk analysis with Monte Carlo</li>
-                <li>💡 <strong>NEW:</strong> Educational tooltips for every metric</li>
-                <li>⚖️ Multi-portfolio and benchmark comparisons</li>
-            </ul>
-            <p style="margin-top: 1rem; padding: 1rem; background-color: #e3f2fd; border-radius: 8px;">
-                <strong>📊 Total Return Analysis:</strong> All performance metrics include dividends 
-                reinvested and are adjusted for stock splits. This represents real-world total returns 
-                you would achieve with a buy-and-hold strategy.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-# Get current portfolio
-current = st.session_state.portfolios[st.session_state.current_portfolio]
-portfolio_returns = current['returns']
-prices = current['prices']
-weights = current['weights']
-tickers = current['tickers']
-
-# Calculate metrics for current portfolio
-metrics = calculate_portfolio_metrics(portfolio_returns)
 
 # =============================================================================
-# TABS STRUCTURE - 7 TABS
+# TABS STRUCTURE  
 # =============================================================================
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "📚 Portfolio Education", 
     "📈 Overview",
     "📊 Detailed Analysis", 
     "📬 PyFolio Analysis",
@@ -2021,3266 +2452,3985 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
 ])
 
 # =============================================================================
-# TAB 1: OVERVIEW
+# REDESIGNED EDUCATION TAB - Sleeve-by-Sleeve ETF Analysis
+# Replace the entire tab0 content (around line 1996-2143) with this
 # =============================================================================
 
-
-# =============================================================================
-# REDESIGNED OVERVIEW TAB - "INVESTING AS COOKING"
-# Replace the existing Overview tab (with tab1:) with this version
-# =============================================================================
-
-
-with tab1:
+with tab0:
     st.markdown("""
-        <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+        <div style="text-align: center; padding: 2.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                     border-radius: 15px; color: white; margin-bottom: 2rem;">
-            <h1 style="margin: 0; font-size: 2.5rem;">👨‍🍳 Your Investment Kitchen</h1>
-            <p style="font-size: 1.2rem; margin-top: 0.5rem; opacity: 0.9;">
-                Investing is like cooking - you need the right ingredients, proper proportions, and perfect timing
+            <h1 style="margin: 0; font-size: 3rem;">🎯 ETF Sleeve Builder</h1>
+            <p style="font-size: 1.3rem; margin-top: 0.8rem; opacity: 0.95;">
+                Professional ETF analysis • Best-in-class selections • Build your optimal portfolio
             </p>
         </div>
     """, unsafe_allow_html=True)
     
     # =============================================================================
-    # SECTION 1: WHAT ARE YOU COOKING? (The Goal)
+    # SLEEVE 1: CORE MARKET (Overall Market Exposure)
     # =============================================================================
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 1.5rem; 
-                    border-radius: 10px; border-left: 5px solid #667eea; margin-bottom: 2rem;">
-            <h2 style="margin-top: 0; color: #2c3e50;">🎯 1. What Are You Cooking?</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
-                <strong>Your Goal:</strong> Every great dish starts with knowing what you're making. 
-                What's your investment objective?
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    
-    # Calculate values
-    start_date = pd.to_datetime(current['start_date'])
-    end_date = pd.to_datetime(current['end_date'])
-    days_invested = (end_date - start_date).days
-    years_invested = days_invested / 365.25
-    total_return = metrics['Total Return']
-    final_value = 100000 * (1 + total_return)
-    volatility = metrics['Annual Volatility']
-    
-    with col1:
-        st.markdown("""
-            <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
-                <h4 style="color: #667eea; margin-top: 0;">📅 Time Horizon</h4>
-        """, unsafe_allow_html=True)
-        st.metric("Analysis Period", f"{years_invested:.1f} years")
-        st.markdown(f"*{start_date.strftime('%b %Y')} to {end_date.strftime('%b %Y')}*")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-            <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
-                <h4 style="color: #667eea; margin-top: 0;">💰 Portfolio Value</h4>
-        """, unsafe_allow_html=True)
-        st.metric("$100k Invested", f"${final_value:,.0f}", f"{total_return*100:+.1f}%")
-        st.markdown(f"*{metrics['Annual Return']*100:.1f}% annualized*")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-            <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
-                <h4 style="color: #667eea; margin-top: 0;">📊 Risk Profile</h4>
-        """, unsafe_allow_html=True)
+    with st.expander("🏢 **SLEEVE 1: Core Market - Overall Market Exposure**", expanded=True):
+        st.markdown("### The Foundation: Broad Market ETFs")
+        st.markdown("*Your portfolio's anchor. Choose ONE as your core holding (30-60% allocation)*")
         
-        if volatility < 0.10:
-            risk_profile = "Conservative 🛡️"
-            risk_color = "#28a745"
-        elif volatility < 0.15:
-            risk_profile = "Moderate 🎯"
-            risk_color = "#ffc107"
-        elif volatility < 0.20:
-            risk_profile = "Aggressive 🚀"
-            risk_color = "#fd7e14"
-        else:
-            risk_profile = "Very Aggressive ⚡"
-            risk_color = "#dc3545"
-        
-        st.markdown(f"<h3 style='color: {risk_color}; margin: 0.5rem 0;'>{risk_profile}</h3>", unsafe_allow_html=True)
-        st.metric("Volatility", f"{volatility*100:.1f}%")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # =============================================================================
-    # SECTION 2: YOUR INGREDIENTS (The Portfolio)
-    # =============================================================================
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 1.5rem; 
-                    border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 2rem;">
-            <h2 style="margin-top: 0; color: #2c3e50;">🥘 2. Your Ingredients</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
-                <strong>The Portfolio:</strong> Each ETF is an ingredient. Know what each brings to the table and its quality.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([3, 2])
-    
-    with col1:
-        # Enhanced ingredient table
-        ingredients_data = []
-        for ticker in weights.keys():
-            weight = weights[ticker]
-            
-            if ticker in prices.columns:
-                signal_data = generate_trading_signal(prices[ticker])
-                action = signal_data['action']
-                
-                ticker_returns = prices[ticker].pct_change().dropna()
-                ticker_annual_return = (1 + ticker_returns.mean()) ** 252 - 1
-                
-                # Categorize
-                if ticker in ['SPY', 'VTI', 'QQQ', 'VOO', 'VUG']:
-                    ingredient_type = "🥩 Main Course (Core Growth)"
-                elif ticker in ['AGG', 'BND', 'TLT', 'IEF', 'SHY']:
-                    ingredient_type = "🥗 Stabilizer (Bonds)"
-                elif ticker in ['VEA', 'VWO', 'EFA', 'IEMG', 'VXUS']:
-                    ingredient_type = "🌶️ Spice (International)"
-                elif ticker in ['GLD', 'IAU']:
-                    ingredient_type = "🧂 Preservative (Gold)"
-                elif ticker in ['VYM', 'SCHD', 'DVY']:
-                    ingredient_type = "💰 Dividend"
-                else:
-                    ingredient_type = "🥄 Specialty"
-                
-                ingredients_data.append({
-                    'Ticker': ticker,
-                    'Type': ingredient_type,
-                    'Portion': f"{weight*100:.1f}%",
-                    'Performance': f"{ticker_annual_return*100:+.1f}%/yr",
-                    'Action': action
-                })
-        
-        ingredients_df = pd.DataFrame(ingredients_data)
-        
-        def style_action(val):
-            if val == 'Accumulate':
-                return 'background-color: #d4edda; color: #155724; font-weight: bold'
-            elif val == 'Distribute':
-                return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
-            elif val == 'Hold':
-                return 'background-color: #fff3cd; color: #856404; font-weight: bold'
-            return ''
-        
-        styled_ingredients = ingredients_df.style.applymap(style_action, subset=['Action'])
-        st.dataframe(styled_ingredients, use_container_width=True, hide_index=True)
-
-
-         # Ingredient Guide
-        with st.expander("🧾 Ingredient Guide - What Each Type Does"):
-            st.markdown("""
-            **🥩 Main Course (Core Growth)** - Large-cap stocks (SPY, VTI, QQQ)  
-            → Provides primary growth. Like the protein in your meal.
-            
-            **🥗 Stabilizer (Bonds)** - Fixed income (AGG, BND, TLT)  
-            → Reduces volatility, provides steady income. Like vegetables that balance the meal.
-            
-            **🌶️ Spice (International)** - Foreign stocks (VEA, VWO, EFA)  
-            → Adds diversification and growth from other economies. Enhances flavor.
-            
-            **🧂 Preservative (Gold)** - Precious metals (GLD, IAU)  
-            → Inflation hedge, crisis insurance. Preserves value when market sours.
-            
-            **🥄 Specialty** - Sector-specific or thematic ETFs  
-            → Targeted exposure to specific themes. Special seasoning.
-            """)
-    
-    with col2:
-        # Pie chart
-        fig, ax = plt.subplots(figsize=(7, 7))
-        colors = plt.cm.Set3(range(len(weights)))
-        wedges, texts, autotexts = ax.pie(
-            weights.values(), 
-            labels=weights.keys(), 
-            autopct='%1.1f%%',
-            colors=colors, 
-            startangle=90,
-            textprops={'fontsize': 11, 'weight': 'bold'}
-        )
-        ax.set_title('Current Recipe', fontsize=14, fontweight='bold', pad=20)
-        st.pyplot(fig)
-        
-        # Quality Score
-        st.markdown("### ⭐ Overall Quality")
-        sharpe = metrics['Sharpe Ratio']
-        
-        if sharpe > 1.5:
-            quality = "Excellent"
-            emoji = "🌟🌟🌟🌟🌟"
-            color = "#030804"
-        elif sharpe > 1.0:
-            quality = "Very Good"
-            emoji = "🌟🌟🌟🌟"
-            color = "#06130f"
-        elif sharpe > 0.5:
-            quality = "Good"
-            emoji = "🌟🌟🌟"
-            color = "#0a0802"
-        elif sharpe > 0:
-            quality = "Fair"
-            emoji = "🌟🌟"
-            color = "#21140a"
-        else:
-            quality = "Needs Work"
-            emoji = "🌟"
-            color = "#130607"
-        
-        st.markdown(f"""
-            <div style="background: {color}; color: white; padding: 1.5rem; border-radius: 10px; text-align: center;">
-                <h3 style="margin: 0; font-size: 2rem;">{emoji}</h3>
-                <h2 style="margin: 0.5rem 0;">{quality}</h2>
-                <p style="margin: 0; opacity: 0.9;">Sharpe Ratio: {sharpe:.2f}</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # =============================================================================
-    # SECTION 3: THE RECIPE (Allocations)
-    # =============================================================================
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); padding: 1.5rem; 
-                    border-radius: 10px; border-left: 5px solid #ffc107; margin-bottom: 2rem;">
-            <h2 style="margin-top: 0; color: #2c3e50;">📖 3. The Recipe</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
-                <strong>Your Allocations:</strong> The proportions matter. Too much spice ruins the dish. 
-                Too little and it's bland.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("#### 🎯 Current Mix")
-        
-        # Categorize holdings
-        growth_tickers = ['SPY', 'VTI', 'QQQ', 'VOO', 'VUG']
-        bond_tickers = ['AGG', 'BND', 'TLT', 'IEF', 'SHY']
-        international_tickers = ['VEA', 'VWO', 'EFA', 'IEMG', 'VXUS']
-        
-        growth_weight = sum([weights.get(t, 0) for t in growth_tickers])
-        bond_weight = sum([weights.get(t, 0) for t in bond_tickers])
-        intl_weight = sum([weights.get(t, 0) for t in international_tickers])
-        other_weight = 1 - growth_weight - bond_weight - intl_weight
-        
-        mix_df = pd.DataFrame({
-            'Category': ['🥩 Growth', '🥗 Bonds', '🌶️ International', '🥄 Other'],
-            'Weight': [
-                f"{growth_weight*100:.1f}%",
-                f"{bond_weight*100:.1f}%",
-                f"{intl_weight*100:.1f}%",
-                f"{other_weight*100:.1f}%"
-            ]
+        core_etfs = pd.DataFrame({
+            'ETF': ['SPY', 'VOO', 'IVV', 'VTI', 'ITOT'],
+            'Name': ['SPDR S&P 500', 'Vanguard S&P 500', 'iShares Core S&P 500', 'Vanguard Total Market', 'iShares Core Total Market'],
+            'Expense Ratio': ['0.09%', '0.03%', '0.03%', '0.03%', '0.03%'],
+            'Holdings': ['503', '503', '503', '3,800+', '3,600+'],
+            'Liquidity': ['Highest', 'High', 'High', 'High', 'Medium'],
+            'Best For': ['Trading/Options', 'Low cost, tax efficient', 'Low cost, reliable', 'Total market exposure', 'Lower cost total market']
         })
-        st.dataframe(mix_df, use_container_width=True, hide_index=True)
+        
+        st.dataframe(core_etfs, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+            **🎯 MY RECOMMENDATION:**
+            - **Primary Choice: VOO** (Vanguard S&P 500)
+              - Lowest expense ratio among S&P 500 funds (0.03%)
+              - Excellent tax efficiency
+              - Strong tracking, massive AUM ($500B+)
+              - Best for long-term buy-and-hold investors
+            
+            - **Alternative: VTI** (if you want total market)
+              - Adds mid/small cap exposure (3,800+ holdings vs 503)
+              - Still only 0.03% expense ratio
+              - Slightly more volatile but better diversification
+              - Historical performance nearly identical to VOO
+            
+            - **For Active Traders: SPY**
+              - Most liquid ETF in the world
+              - Best for options trading
+              - Higher expense ratio (0.09%) is worth it for liquidity
+            
+            **⚠️ AVOID:** Redundancy - Don't own SPY + VOO + IVV (they're all the same index!)
+        """)
+        
+        if st.button("📥 Load Core: VOO 50%", key="load_voo"):
+            st.session_state.loaded_model = {
+                'name': 'Core Market - VOO',
+                'tickers': ['VOO'],
+                'weights': {'VOO': 0.50}
+            }
+            st.success("✅ Loaded! Add more sleeves in sidebar")
     
-    with col2:
-        st.markdown("#### 🎨 Style Analysis")
-        
-        # Determine style
-        if growth_weight > 0.7:
-            style = "Aggressive Growth"
-            style_emoji = "🚀"
-            style_color = "#0f0506"
-        elif growth_weight > 0.5 and bond_weight < 0.3:
-            style = "Growth"
-            style_emoji = "📈"
-            style_color = "#180f08"
-        elif growth_weight > 0.4 and bond_weight > 0.3:
-            style = "Balanced"
-            style_emoji = "⚖️"
-            style_color = "#0e0b04"
-        elif bond_weight > 0.5:
-            style = "Conservative"
-            style_emoji = "🛡️"
-            style_color = "#040c06"
-        else:
-            style = "Custom"
-            style_emoji = "🎨"
-            style_color = "#06030b"
-        
-        st.markdown(f"""
-            <div style="background: {style_color}; color: white; padding: 1rem; border-radius: 10px; text-align: center;">
-                <h2 style="margin: 0; font-size: 3rem;">{style_emoji}</h2>
-                <h4 style="margin: 0.5rem 0;">{style}</h4>
-            </div>
-        """, unsafe_allow_html=True)
+    # =============================================================================
+    # SLEEVE 2: GROWTH
+    # =============================================================================
     
-    with col3:
-        st.markdown("#### 💡 Recipe Tips")
+    with st.expander("🚀 **SLEEVE 2: Growth - Technology & Innovation**"):
+        st.markdown("### Growth & Technology ETFs")
+        st.markdown("*Higher returns, higher volatility. Recommended 10-30% allocation.*")
         
-        # Actionable allocation guidance
-        tips = []
-        if growth_weight > 0.8:
-            tips.append("⚠️ Very high growth allocation - consider adding stabilizers")
-        elif growth_weight < 0.3:
-            tips.append("💡 Low growth - may limit long-term returns")
+        growth_etfs = pd.DataFrame({
+            'ETF': ['QQQ', 'VUG', 'VGT', 'IWF', 'SCHG', 'MGK'],
+            'Name': ['Invesco QQQ', 'Vanguard Growth', 'Vanguard Info Tech', 'iShares Russell 1000 Growth', 'Schwab US Large Growth', 'Vanguard Mega Cap Growth'],
+            'Expense Ratio': ['0.20%', '0.04%', '0.10%', '0.19%', '0.04%', '0.07%'],
+            'Top Holdings': ['AAPL, MSFT, NVDA', 'AAPL, MSFT, AMZN', '100% Tech', 'AAPL, MSFT, NVDA', 'AAPL, MSFT, AMZN', 'AAPL, MSFT, AMZN'],
+            'Concentration': ['Top 10: 49%', 'Top 10: 42%', 'Top 10: 68%', 'Top 10: 45%', 'Top 10: 43%', 'Top 10: 62%'],
+            '10Yr Return': ['18.9%', '15.2%', '20.1%', '15.5%', 'N/A (2009)', '16.8%']
+        })
         
-        if bond_weight < 0.1 and growth_weight > 0.7:
-            tips.append("⚠️ High volatility risk - add some bonds for stability")
+        st.dataframe(growth_etfs, use_container_width=True, hide_index=True)
         
-        if intl_weight < 0.1:
-            tips.append("🌍 Low international - missing diversification")
-        elif intl_weight > 0.4:
-            tips.append("🌍 High international exposure")
+        st.markdown("""
+            **🎯 MY RECOMMENDATION:**
+            - **Best Pure Growth: QQQ** (Nasdaq-100)
+              - Proven performer: 18.9% annualized over 10 years
+              - Concentrated tech exposure (top 10 = 49% of fund)
+              - Higher expense ratio (0.20%) but worth it for performance
+              - **Use case:** Bull markets, long time horizon (10+ years)
+              - **Risk:** Crashes hard in bear markets (-30% in 2022)
+            
+            - **Best Diversified Growth: VUG**
+              - Only 0.04% expense ratio (5x cheaper than QQQ)
+              - Broader growth exposure, less concentrated
+              - Better risk-adjusted returns (lower volatility than QQQ)
+              - **Use case:** Growth exposure without tech concentration risk
+            
+            - **Most Aggressive: VGT** (100% Technology)
+              - 20.1% annualized returns (highest)
+              - ALL technology - no other sectors
+              - Top 10 holdings = 68% of fund (extremely concentrated)
+              - **Use case:** Strong tech conviction, can stomach 40%+ drawdowns
+            
+            **💡 SMART COMBINATION:**
+            - 60% VUG (core growth) + 40% VGT (tech tilt) = balanced growth exposure
+            - Or: 100% QQQ if you want simplicity + proven track record
+            
+            **⚠️ WARNING:** Don't combine QQQ + VUG + VGT - massive overlap!
+        """)
         
-        if not tips:
-            tips.append("✅ Allocation looks reasonable")
+        if st.button("📥 Load Growth: QQQ 20%", key="load_qqq"):
+            st.session_state.loaded_model = {
+                'name': 'Growth - QQQ',
+                'tickers': ['QQQ'],
+                'weights': {'QQQ': 0.20}
+            }
+            st.success("✅ Loaded!")
+    
+    # =============================================================================
+    # SLEEVE 3: DIVIDEND & INCOME
+    # =============================================================================
+    
+    with st.expander("💰 **SLEEVE 3: Dividend & Income - Cash Flow Generation**"):
+        st.markdown("### Dividend Growth ETFs")
+        st.markdown("*Income + growth. Recommended 15-25% for retirement portfolios.*")
         
-        for tip in tips:
-            st.info(tip)
+        div_etfs = pd.DataFrame({
+            'ETF': ['SCHD', 'VIG', 'DGRO', 'VYM', 'DVY', 'NOBL'],
+            'Name': ['Schwab US Dividend Equity', 'Vanguard Dividend Appreciation', 'iShares Core Div Growth', 'Vanguard High Div Yield', 'iShares Select Dividend', 'ProShares S&P 500 Div Aristocrats'],
+            'Expense Ratio': ['0.06%', '0.06%', '0.08%', '0.06%', '0.38%', '0.35%'],
+            'Yield': ['3.5%', '1.8%', '2.5%', '2.9%', '3.6%', '2.1%'],
+            'Div Growth': ['10yr: 12% avg', '10yr: 8% avg', '5yr: 10% avg', '10yr: 6% avg', '10yr: 5% avg', '10yr: 9% avg'],
+            '10Yr Return': ['13.2%', '11.8%', 'N/A (2014)', '10.5%', '10.1%', '12.4%']
+        })
+        
+        st.dataframe(div_etfs, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+            **🎯 MY RECOMMENDATION:**
+            - **#1 BEST: SCHD** (Schwab US Dividend Equity)
+              - **Winner**: Highest total return (13.2% annualized)
+              - 3.5% yield + 12% annual dividend growth = compounding machine
+              - Only 0.06% expense ratio
+              - Quality focused (financial health metrics)
+              - Top holdings: HD, CSCO, TXN, PEP, VZ
+              - **Perfect for:** Tax-advantaged accounts, dividend reinvestment
+            
+            - **Best for Qualified Dividends: VIG**
+              - Lower yield (1.8%) but higher quality companies
+              - 10+ years consecutive dividend increases required
+              - More growth-oriented than SCHD
+              - **Use case:** Taxable accounts (qualified dividends)
+            
+            - **Highest Yield: DVY**
+              - 3.6% yield is attractive
+              - **BUT**: High expense ratio (0.38% = 6x SCHD)
+              - Lower quality companies
+              - Underperforms SCHD on total return
+              - **Only use if:** You NEED current income NOW
+            
+            **💡 OPTIMAL DIVIDEND SLEEVE:**
+            - **Simple:** 100% SCHD (best performance + yield balance)
+            - **Advanced:** 70% SCHD + 30% VIG (yield + quality growth)
+            - **Income Focus:** 80% SCHD + 20% DVY (maximize yield)
+            
+            **🔥 POWER MOVE:**
+            - SCHD in Roth IRA: Tax-free dividends + tax-free growth = wealth building machine
+            - Dividend reinvestment: 3.5% yield * 12% growth = doubles every ~5 years
+            
+            **⚠️ MISTAKE TO AVOID:** Don't buy SCHD in taxable account if in high tax bracket
+        """)
+        
+        if st.button("📥 Load Dividend: SCHD 20%", key="load_schd"):
+            st.session_state.loaded_model = {
+                'name': 'Dividend - SCHD',
+                'tickers': ['SCHD'],
+                'weights': {'SCHD': 0.20}
+            }
+            st.success("✅ Loaded!")
+    
+    # =============================================================================
+    # SLEEVE 4: DEFENSIVE BALLAST (Bonds)
+    # =============================================================================
+    
+    with st.expander("🛡️ **SLEEVE 4: Defensive Ballast - Bonds & Stability**"):
+        st.markdown("### Bond ETFs - Your Portfolio Shock Absorber")
+        st.markdown("*Reduces volatility. Recommended 20-40% for conservative portfolios.*")
+        
+        bond_etfs = pd.DataFrame({
+            'ETF': ['AGG', 'BND', 'TLT', 'IEF', 'SHY', 'TIP', 'LQD'],
+            'Name': ['iShares Core Agg Bond', 'Vanguard Total Bond', 'iShares 20+ Yr Treasury', 'iShares 7-10 Yr Treasury', 'iShares 1-3 Yr Treasury', 'iShares TIPS', 'iShares Invest Grade Corp'],
+            'Expense Ratio': ['0.03%', '0.03%', '0.15%', '0.15%', '0.15%', '0.19%', '0.14%'],
+            'Duration': ['6.2 years', '6.7 years', '17.5 years', '7.5 years', '1.9 years', '7.4 years', '8.6 years'],
+            'Yield': ['4.5%', '4.6%', '4.7%', '4.3%', '5.1%', '5.2% (real)', '5.3%'],
+            'Volatility': ['Low', 'Low', 'VERY HIGH', 'Medium', 'Very Low', 'Medium', 'Medium']
+        })
+        
+        st.dataframe(bond_etfs, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+            **🎯 MY RECOMMENDATION BY SCENARIO:**
+            
+            **Scenario 1: Normal Diversification (most people)**
+            - **Best: AGG** (iShares Core Aggregate Bond)
+              - Gold standard aggregate bond fund
+              - Diversified: Treasuries + Corporates + MBS
+              - 6.2 year duration = moderate interest rate sensitivity
+              - 4.5% yield + capital appreciation potential
+              - Only 0.03% expense ratio
+              - **Use when:** You want "set and forget" bond exposure
+            
+            **Scenario 2: Deflation / Recession Protection**
+            - **Best: TLT** (Long-term Treasuries 20+ years)
+              - **WARNING:** VERY volatile (acts like stocks sometimes)
+              - When stocks crash, TLT often surges (flight to safety)
+              - 2008: TLT +34% while SPY -37%
+              - 2022: TLT -31% (interest rates rose)
+              - **Only use if:** You're hedging a stock crash
+              - **Allocation:** 10-15% max
+            
+            **Scenario 3: Rising Interest Rates**
+            - **Best: SHY** (Short-term 1-3 year Treasuries)
+              - Minimal interest rate risk (1.9 year duration)
+              - Currently 5.1% yield (higher than long-term!)
+              - When rates rise, SHY barely moves
+              - **Use when:** Fed is raising rates or rates volatile
+            
+            **Scenario 4: Inflation Protection**
+            - **Best: TIP** (Treasury Inflation-Protected)
+              - Yield adjusts with inflation (5.2% real yield)
+              - Principal increases with CPI
+              - 2022: TIP -12% vs AGG -13% (better in high inflation)
+              - **Use when:** Inflation expectations rising
+            
+            **💡 OPTIMAL BOND SLEEVE (Current Environment - Jan 2026):**
+            - **Conservative:** 60% AGG + 30% TLT + 10% TIP
+            - **Moderate:** 100% AGG (simple, diversified)
+            - **Defensive:** 50% AGG + 50% SHY (low volatility)
+            - **Inflation Hedge:** 70% TIP + 30% SHY
+            
+            **🔥 CURRENT MARKET VIEW (My Opinion):**
+            - Fed rate cuts likely in 2026 → TLT could benefit
+            - But use SMALL allocation (10-15%) due to volatility
+            - Core should be AGG for stability
+            - Add TIP if inflation concerns persist
+            
+            **⚠️ CRITICAL WARNING:**
+            - TLT is NOT a "safe" bond fund - it's highly volatile!
+            - Duration = price sensitivity to rates (17.5 years = 17.5% move per 1% rate change)
+            - Don't use TLT as your only bond holding!
+        """)
+        
+        if st.button("📥 Load Bonds: AGG 25% + TLT 10%", key="load_bonds"):
+            st.session_state.loaded_model = {
+                'name': 'Bonds - Balanced',
+                'tickers': ['AGG', 'TLT'],
+                'weights': {'AGG': 0.25, 'TLT': 0.10}
+            }
+            st.success("✅ Loaded!")
+    
+    # =============================================================================
+    # SLEEVE 5: INTERNATIONAL
+    # =============================================================================
+    
+    with st.expander("🌍 **SLEEVE 5: International - Global Diversification**"):
+        st.markdown("### International Equity ETFs")
+        st.markdown("*Reduce US dependence. Recommended 15-25% allocation.*")
+        
+        intl_etfs = pd.DataFrame({
+            'ETF': ['VEA', 'VXUS', 'EFA', 'VWO', 'IEMG', 'IXUS'],
+            'Name': ['Vanguard Developed Markets', 'Vanguard Total Intl', 'iShares MSCI EAFE', 'Vanguard Emerging Markets', 'iShares Core Emerging', 'iShares Core Total Intl'],
+            'Expense Ratio': ['0.05%', '0.08%', '0.32%', '0.08%', '0.09%', '0.09%'],
+            'Geography': ['Developed only', 'Dev + Emerging', 'Developed only', 'Emerging only', 'Emerging only', 'Dev + Emerging'],
+            'Top Countries': ['Japan, UK, Canada', 'Japan, UK, China', 'Japan, UK, France', 'China, India, Taiwan', 'China, India, Taiwan', 'Japan, UK, China'],
+            '10Yr Return': ['5.2%', '4.8%', '5.0%', '3.1%', '3.8%', '4.7%']
+        })
+        
+        st.dataframe(intl_etfs, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+            **🎯 MY HONEST ASSESSMENT:**
+            
+            **The Uncomfortable Truth:**
+            - International has UNDERPERFORMED US for 15 years straight
+            - VEA 10-year: 5.2% vs VOO: 13.1% (less than HALF the returns!)
+            - Many investors regret international allocation
+            - **BUT**: Past performance ≠ future returns
+            
+            **Why Still Consider International?**
+            1. **Valuation:** Intl P/E ~13 vs US P/E ~21 (cheaper)
+            2. **Currency hedge:** Diversifies away from USD
+            3. **Different cycles:** When US slows, others may lead
+            4. **Mean reversion:** Eventually valuations matter
+            
+            **🎯 MY RECOMMENDATION:**
+            
+            **For Most Investors:**
+            - **Best: VEA** (Developed Markets only)
+              - 0.05% expense ratio (lowest cost)
+              - Developed markets = less risk than emerging
+              - Japan, UK, Canada = stable economies
+              - **Allocation:** 10-15% of portfolio
+              - **Why not more:** US companies already have global revenue
+            
+            **For Aggressive Allocation:**
+            - **Best: VXUS** (Total International)
+              - Developed + Emerging in market cap weights
+              - "Set and forget" international
+              - 0.08% expense ratio
+              - **Allocation:** 20-30% if you want max diversification
+            
+            **For Emerging Markets Believers:**
+            - **Best: VWO** (Emerging Markets)
+              - China, India, Taiwan growth story
+              - Higher risk, higher potential reward
+              - **BUT**: 10-year returns only 3.1% (weak)
+              - **Allocation:** 5-10% max, only if high conviction
+            
+            **💡 MY PERSONAL APPROACH:**
+            - **Conservative:** 10% VEA (minimal international)
+            - **Moderate:** 20% VXUS (standard diversification)
+            - **Aggressive:** Skip international entirely, focus on US
+            
+            **🔥 CONTRARIAN VIEW:**
+            - International is CHEAP relative to US
+            - If US multiple compresses from 21 to 18 = -14% return
+            - If Intl multiple expands from 13 to 15 = +15% return
+            - Next 10 years could favor international
+            - **But**: I'm not betting heavy on it (10-15% allocation only)
+            
+            **⚠️ WHAT I'D AVOID:**
+            - EFA: 0.32% expense ratio is 6x VEA (no reason to use)
+            - Heavy EM allocation: Too volatile, poor historical returns
+            - 40%+ international: US companies already global
+        """)
+        
+        if st.button("📥 Load International: VEA 15%", key="load_vea"):
+            st.session_state.loaded_model = {
+                'name': 'International - VEA',
+                'tickers': ['VEA'],
+                'weights': {'VEA': 0.15}
+            }
+            st.success("✅ Loaded!")
+    
+    # =============================================================================
+    # SLEEVE 6: FACTOR SLEEVES (Advanced)
+    # =============================================================================
+    
+    with st.expander("🎯 **SLEEVE 6: Factor Sleeves - Academic Factor Premiums**"):
+        st.markdown("### Factor ETFs - Beyond Market Beta")
+        st.markdown("*Advanced strategy. 5-15% allocation for sophisticated investors.*")
+        
+        factor_etfs = pd.DataFrame({
+            'ETF': ['VTV', 'MTUM', 'QUAL', 'USMV', 'SIZE', 'VLUE'],
+            'Factor': ['Value', 'Momentum', 'Quality', 'Low Volatility', 'Size (Small Cap)', 'Value (Enhanced)'],
+            'Name': ['Vanguard Value', 'iShares Momentum', 'iShares Quality', 'iShares Min Vol', 'iShares Size', 'iShares Enhanced Value'],
+            'Expense Ratio': ['0.04%', '0.15%', '0.15%', '0.15%', '0.15%', '0.15%'],
+            'Methodology': ['Low P/B, P/E', 'Price momentum', 'ROE, debt, earnings', 'Low volatility stocks', 'Small cap focus', 'Multi-factor value'],
+            '10Yr Return': ['10.8%', '14.2%', '14.5%', '11.2%', '10.3%', 'N/A (2018)']
+        })
+        
+        st.dataframe(factor_etfs, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+            **🎯 FACTOR INVESTING - MY HONEST TAKE:**
+            
+            **The Theory:**
+            - Academic research shows factors outperform market over long term
+            - Value, Momentum, Quality, Size = documented premiums
+            - **But**: Theory ≠ reality in your portfolio
+            
+            **The Reality:**
+            - Factors go through LONG periods of underperformance
+            - Value crushed 2010-2020 (growth dominated)
+            - Requires discipline to hold during drawdowns
+            - **Most investors quit at the worst time**
+            
+            **🎯 MY RECOMMENDATIONS BY FACTOR:**
+            
+            **1. Quality (QUAL) - BEST FOR MOST**
+            - 14.5% 10-year return (outperformed market!)
+            - Low debt, high ROE, stable earnings
+            - Downside protection in bear markets
+            - Top holdings: AAPL, MSFT, JNJ, V
+            - **Use case:** Core satellite (5-10% allocation)
+            - **Why:** Works in most environments
+            
+            **2. Momentum (MTUM) - FOR TRADERS**
+            - 14.2% 10-year return (excellent)
+            - Buys recent winners, sells losers
+            - **BUT**: Whipsaws in volatile markets
+            - Rebalances quarterly (tracking momentum shifts)
+            - **Use case:** Bull market outperformance (5-10%)
+            - **Warning:** Can reverse sharply
+            
+            **3. Value (VTV) - CONTRARIAN PLAY**
+            - 10.8% 10-year return (underperformed SPY)
+            - **But**: 2022 value crushed growth (+4% vs -30%)
+            - Cheap stocks eventually work
+            - **Use case:** IF you believe value comeback (10-15%)
+            - **Problem:** Requires 10+ year horizon
+            
+            **4. Low Volatility (USMV) - DEFENSIVE**
+            - 11.2% return with LOWER volatility
+            - Best risk-adjusted returns (high Sharpe ratio)
+            - Lags in bull markets, protects in bears
+            - **Use case:** Risk reduction (10-15%)
+            - **Best for:** Retirees, risk-averse
+            
+            **💡 MY PERSONAL FACTOR PORTFOLIO:**
+            - **If forced to choose ONE: QUAL** (quality works everywhere)
+            - **Aggressive combo:** 50% QUAL + 50% MTUM (quality + momentum)
+            - **Defensive combo:** 60% QUAL + 40% USMV (quality + low vol)
+            - **Contrarian:** 100% VTV (value bet)
+            
+            **🔥 ADVANCED STRATEGY:**
+            - **Tactical rotation:** Switch factors based on market regime
+            - Bull market: MTUM (momentum)
+            - Bear market: USMV (low vol)
+            - Recovery: VTV (value)
+            - **But**: This is HARD to execute
+            
+            **⚠️ FACTOR INVESTING WARNINGS:**
+            1. **Long dry spells:** Value dead 2010-2020
+            2. **Requires conviction:** Hold through underperformance
+            3. **Not "free money":** Premiums are compensation for risk/pain
+            4. **Keep allocation small:** 5-15% max
+            5. **Most investors fail:** Quit at bottom of cycle
+            
+            **MY VERDICT:**
+            - Skip factors unless you're sophisticated investor
+            - If you use: Start with QUAL (easiest to hold)
+            - Allocation: 5-10% as satellite position
+            - **Better:** Just own VOO and sleep well
+        """)
+        
+        if st.button("📥 Load Factor: QUAL 10%", key="load_qual"):
+            st.session_state.loaded_model = {
+                'name': 'Factor - Quality',
+                'tickers': ['QUAL'],
+                'weights': {'QUAL': 0.10}
+            }
+            st.success("✅ Loaded!")
+    
+    # =============================================================================
+    # BUILD YOUR COMPLETE PORTFOLIO
+    # =============================================================================
     
     st.markdown("---")
+    st.markdown("## 🏗️ Build Your Complete Portfolio")
+    st.markdown("*Combine sleeves to create your optimal allocation. Here are my suggestions based on different investor profiles:*")
     
-    # =============================================================================
-    # SECTION 4: WHEN TO ADD INGREDIENTS (Timing)
-    # =============================================================================
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); padding: 1.5rem; 
-                    border-radius: 10px; border-left: 5px solid #17a2b8; margin-bottom: 2rem;">
-            <h2 style="margin-top: 0; color: #2c3e50;">⏰ 4. When to Add Ingredients</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
-                <strong>Timing Matters:</strong> Add ingredients at the right time. Don't add salt before sugar. 
-                Know when to accumulate and when to pull back.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    profile = st.selectbox("**Choose Your Investor Profile:**", [
+        "Select a profile...",
+        "🚀 Aggressive Growth (20s-30s, high risk tolerance)",
+        "📈 Growth Focus (30s-40s, long horizon)",
+        "⚖️ Balanced Growth (40s-50s, moderate risk)",
+        "🛡️ Conservative Growth (50s-60s, approaching retirement)",
+        "💰 Income Focus (60s+, retired)",
+        "🎯 Sophisticated / Custom"
+    ])
     
-    col1, col2 = st.columns(2)
+    if profile == "🚀 Aggressive Growth (20s-30s, high risk tolerance)":
+        st.markdown("""
+            ### Aggressive Growth Portfolio
+            - **VOO (Core):** 40%
+            - **QQQ (Growth):** 30%
+            - **VEA (International):** 15%
+            - **QUAL (Quality Factor):** 10%
+            - **AGG (Bonds):** 5%
+            
+            **Total:** 100% | **Stocks/Bonds:** 95/5
+            
+            **Expected:** 12-15% annual return, -35% max drawdown
+            
+            **Why this works:**
+            - Heavy growth tilt for maximum long-term returns
+            - Minimal bonds (you have time to recover)
+            - International for diversification
+            - Quality factor for extra edge
+            - Can stomach high volatility
+        """)
+        if st.button("📥 Load This Portfolio", key="load_aggressive"):
+            st.session_state.loaded_model = {
+                'name': 'Aggressive Growth',
+                'tickers': ['VOO', 'QQQ', 'VEA', 'QUAL', 'AGG'],
+                'weights': {'VOO': 0.40, 'QQQ': 0.30, 'VEA': 0.15, 'QUAL': 0.10, 'AGG': 0.05}
+            }
+            st.success("✅ Loaded! Go to sidebar → Build Portfolio")
+            st.balloons()
     
-    with col1:
-        st.markdown("### 🌡️ Market Temperature")
+    elif profile == "📈 Growth Focus (30s-40s, long horizon)":
+        st.markdown("""
+            ### Growth Focus Portfolio
+            - **VOO (Core):** 45%
+            - **QQQ (Growth):** 20%
+            - **SCHD (Dividend):** 15%
+            - **VEA (International):** 10%
+            - **AGG (Bonds):** 10%
+            
+            **Total:** 100% | **Stocks/Bonds:** 90/10
+            
+            **Expected:** 10-13% annual return, -30% max drawdown
+            
+            **Why this works:**
+            - Strong growth core with VOO + QQQ
+            - SCHD adds quality dividend growth
+            - Small bond buffer for stability
+            - Still aggressive but more balanced than 20s portfolio
+        """)
+        if st.button("📥 Load This Portfolio", key="load_growth"):
+            st.session_state.loaded_model = {
+                'name': 'Growth Focus',
+                'tickers': ['VOO', 'QQQ', 'SCHD', 'VEA', 'AGG'],
+                'weights': {'VOO': 0.45, 'QQQ': 0.20, 'SCHD': 0.15, 'VEA': 0.10, 'AGG': 0.10}
+            }
+            st.success("✅ Loaded! Go to sidebar → Build Portfolio")
+            st.balloons()
+    
+    elif profile == "⚖️ Balanced Growth (40s-50s, moderate risk)":
+        st.markdown("""
+            ### Balanced Growth Portfolio
+            - **VOO (Core):** 40%
+            - **SCHD (Dividend):** 20%
+            - **VEA (International):** 15%
+            - **AGG (Bonds):** 20%
+            - **TLT (Long Bonds):** 5%
+            
+            **Total:** 100% | **Stocks/Bonds:** 75/25
+            
+            **Expected:** 8-11% annual return, -25% max drawdown
+            
+            **Why this works:**
+            - Classic balanced approach
+            - SCHD provides income + growth
+            - 25% bonds for stability
+            - TLT for deflation protection
+            - Reasonable risk/reward
+        """)
+        if st.button("📥 Load This Portfolio", key="load_balanced"):
+            st.session_state.loaded_model = {
+                'name': 'Balanced Growth',
+                'tickers': ['VOO', 'SCHD', 'VEA', 'AGG', 'TLT'],
+                'weights': {'VOO': 0.40, 'SCHD': 0.20, 'VEA': 0.15, 'AGG': 0.20, 'TLT': 0.05}
+            }
+            st.success("✅ Loaded! Go to sidebar → Build Portfolio")
+            st.balloons()
+    
+    elif profile == "🛡️ Conservative Growth (50s-60s, approaching retirement)":
+        st.markdown("""
+            ### Conservative Growth Portfolio
+            - **VOO (Core):** 30%
+            - **SCHD (Dividend):** 25%
+            - **VEA (International):** 10%
+            - **AGG (Bonds):** 25%
+            - **TLT (Long Bonds):** 10%
+            
+            **Total:** 100% | **Stocks/Bonds:** 65/35
+            
+            **Expected:** 7-9% annual return, -20% max drawdown
+            
+            **Why this works:**
+            - Lower equity allocation (65%)
+            - Heavy SCHD for reliable dividends
+            - 35% bonds for stability
+            - Preservation + moderate growth
+            - Lower volatility for peace of mind
+        """)
+        if st.button("📥 Load This Portfolio", key="load_conservative"):
+            st.session_state.loaded_model = {
+                'name': 'Conservative Growth',
+                'tickers': ['VOO', 'SCHD', 'VEA', 'AGG', 'TLT'],
+                'weights': {'VOO': 0.30, 'SCHD': 0.25, 'VEA': 0.10, 'AGG': 0.25, 'TLT': 0.10}
+            }
+            st.success("✅ Loaded! Go to sidebar → Build Portfolio")
+            st.balloons()
+    
+    elif profile == "💰 Income Focus (60s+, retired)":
+        st.markdown("""
+            ### Income Focus Portfolio
+            - **SCHD (Dividend):** 35%
+            - **VOO (Core):** 20%
+            - **AGG (Bonds):** 30%
+            - **TLT (Long Bonds):** 10%
+            - **VEA (International):** 5%
+            
+            **Total:** 100% | **Stocks/Bonds:** 60/40
+            
+            **Expected:** 6-8% annual return + 3.5% income, -18% max drawdown
+            
+            **Why this works:**
+            - SCHD provides 3.5% yield + growth
+            - 40% bonds for stability
+            - Lower volatility for withdrawals
+            - Classic 60/40 with income tilt
+            - Sustainable for retirement spending
+        """)
+        if st.button("📥 Load This Portfolio", key="load_income"):
+            st.session_state.loaded_model = {
+                'name': 'Income Focus',
+                'tickers': ['SCHD', 'VOO', 'AGG', 'TLT', 'VEA'],
+                'weights': {'SCHD': 0.35, 'VOO': 0.20, 'AGG': 0.30, 'TLT': 0.10, 'VEA': 0.05}
+            }
+            st.success("✅ Loaded! Go to sidebar → Build Portfolio")
+            st.balloons()
+    
+    st.markdown("---")
+    st.info("""
+        **💡 How to Use:**
+        1. Read through each sleeve above
+        2. Select a pre-built profile OR build custom
+        3. Click "Load This Portfolio" 
+        4. Go to **sidebar** → modify if needed → "Build Portfolio"
+        5. Analyze across all tabs
         
-        # Detect current market regime
-        first_ticker = list(weights.keys())[0]
-        if first_ticker in prices.columns:
-            ticker_prices = prices[first_ticker]
-            ticker_returns = ticker_prices.pct_change().dropna()
-            
-            # Calculate market metrics
-            recent_20d_return = (ticker_prices.iloc[-1] / ticker_prices.iloc[-20] - 1) * 100 if len(ticker_prices) >= 20 else 0
-            recent_60d_return = (ticker_prices.iloc[-1] / ticker_prices.iloc[-60] - 1) * 100 if len(ticker_prices) >= 60 else 0
-            vol_60d = ticker_returns.tail(60).std() * np.sqrt(252)
-            
-            # Determine temperature
-            if vol_60d > 0.35:
-                temp = "🔥 TOO HOT"
-                temp_desc = "Market Crisis / Panic"
-                temp_color = "#dc3545"
-                advice = "Step back from the stove. Don't add ingredients. Wait for market to cool."
-            elif recent_60d_return < -10 and vol_60d > 0.25:
-                temp = "❄️ COLD"
-                temp_desc = "Bear Market"
-                temp_color = "#6c757d"
-                advice = "Market cooling down. Prepare ingredients (build cash), wait for the right moment to add."
-            elif recent_60d_return > 15 and vol_60d < 0.20:
-                temp = "🌡️ WARM & STEADY"
-                temp_desc = "Bull Market"
-                temp_color = "#28a745"
-                advice = "Perfect cooking temperature! Keep adding ingredients (accumulate positions)."
-            elif recent_20d_return > 0:
-                temp = "🌤️ WARMING UP"
-                temp_desc = "Recovery"
-                temp_color = "#fd7e14"
-                advice = "Market heating up. Good time to start adding ingredients gradually."
-            else:
-                temp = "😐 LUKEWARM"
-                temp_desc = "Sideways / Choppy"
-                temp_color = "#ffc107"
-                advice = "Market temperature uncertain. Hold current recipe, wait for clearer signals."
-            
-            st.markdown(f"""
-                <div style="background: {temp_color}; color: white; padding: 1.5rem; border-radius: 10px; margin-bottom: 1rem;">
-                    <h2 style="margin: 0; font-size: 2rem;">{temp}</h2>
-                    <h4 style="margin: 0.5rem 0; opacity: 0.9;">{temp_desc}</h4>
-                    <p style="margin: 0.5rem 0; font-size: 0.9rem;">
-                        20-day: {recent_20d_return:+.1f}% | 60-day: {recent_60d_return:+.1f}%<br>
-                        Volatility: {vol_60d*100:.1f}%
-                    </p>
-                </div>
+        **Remember:** These are STARTING points. Adjust based on your unique situation!
+    """)
+
+# =============================================================================
+# PORTFOLIO CHECK AND VARIABLE DEFINITION
+# =============================================================================
+
+if not st.session_state.current_portfolio:
+    # No portfolio - show message in analysis tabs
+    no_portfolio_msg = """
+        <div class="info-box">
+            <h3>👋 No Portfolio Built Yet</h3>
+            <p style="font-size: 1.1rem;">Build a portfolio to see analysis!</p>
+            <p><strong>Quick Start:</strong></p>
+            <ol>
+                <li>Go to <strong>📚 Portfolio Education</strong> tab</li>
+                <li>Choose a model (e.g., ⚖️ Classic 60/40)</li>
+                <li>Click "📥 Load"</li>
+                <li>Go to <strong>sidebar</strong> → "🚀 Build Portfolio"</li>
+            </ol>
+        </div>
+    """
+    with tab1:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab2:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab3:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab4:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab5:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab6:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab7:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab8:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+    with tab9:
+        st.markdown(no_portfolio_msg, unsafe_allow_html=True)
+else:
+    # Portfolio exists - define all variables needed by tabs
+    current = st.session_state.portfolios[st.session_state.current_portfolio]
+    portfolio_returns = current['returns']
+    prices = current['prices']
+    weights = current['weights']
+    tickers = current['tickers']
+    metrics = calculate_portfolio_metrics(portfolio_returns)
+    
+    # =============================================================================
+    # TAB 1: OVERVIEW
+    # =============================================================================
+    with tab1:
+        st.markdown("""
+            <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        border-radius: 15px; color: white; margin-bottom: 2rem;">
+                <h1 style="margin: 0; font-size: 2.5rem;">👨‍🍳 Your Investment Kitchen</h1>
+                <p style="font-size: 1.2rem; margin-top: 0.5rem; opacity: 0.9;">
+                    Investing is like cooking - you need the right ingredients, proper proportions, and perfect timing
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # =============================================================================
+        # SECTION 1: WHAT ARE YOU COOKING? (The Goal)
+        # =============================================================================
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 1.5rem; 
+                        border-radius: 10px; border-left: 5px solid #667eea; margin-bottom: 2rem;">
+                <h2 style="margin-top: 0; color: #2c3e50;">🎯 1. What Are You Cooking?</h2>
+                <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
+                    <strong>Your Goal:</strong> Every great dish starts with knowing what you're making. 
+                    What's your investment objective?
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # Calculate values
+        start_date = pd.to_datetime(current['start_date'])
+        end_date = pd.to_datetime(current['end_date'])
+        days_invested = (end_date - start_date).days
+        years_invested = days_invested / 365.25
+        total_return = metrics['Total Return']
+        final_value = 100000 * (1 + total_return)
+        volatility = metrics['Annual Volatility']
+        
+        with col1:
+            st.markdown("""
+                <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
+                    <h4 style="color: #667eea; margin-top: 0;">📅 Time Horizon</h4>
+            """, unsafe_allow_html=True)
+            st.metric("Analysis Period", f"{years_invested:.1f} years")
+            st.markdown(f"*{start_date.strftime('%b %Y')} to {end_date.strftime('%b %Y')}*")
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+                <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
+                    <h4 style="color: #667eea; margin-top: 0;">💰 Portfolio Value</h4>
+            """, unsafe_allow_html=True)
+            st.metric("$100k Invested", f"${final_value:,.0f}", f"{total_return*100:+.1f}%")
+            st.markdown(f"*{metrics['Annual Return']*100:.1f}% annualized*")
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("""
+                <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); height: 100%;">
+                    <h4 style="color: #667eea; margin-top: 0;">📊 Risk Profile</h4>
             """, unsafe_allow_html=True)
             
-            st.info(f"**👨‍🍳 Chef's Advice:** {advice}")
-    
-    with col2:
-        st.markdown("### 📋 Shopping List")
-        st.markdown("*What to accumulate or reduce based on current signals*")
+            if volatility < 0.10:
+                risk_profile = "Conservative 🛡️"
+                risk_color = "#28a745"
+            elif volatility < 0.15:
+                risk_profile = "Moderate 🎯"
+                risk_color = "#ffc107"
+            elif volatility < 0.20:
+                risk_profile = "Aggressive 🚀"
+                risk_color = "#fd7e14"
+            else:
+                risk_profile = "Very Aggressive ⚡"
+                risk_color = "#dc3545"
+            
+            st.markdown(f"<h3 style='color: {risk_color}; margin: 0.5rem 0;'>{risk_profile}</h3>", unsafe_allow_html=True)
+            st.metric("Volatility", f"{volatility*100:.1f}%")
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        # Create shopping list
-        accumulate_list = []
-        distribute_list = []
-        hold_list = []
+        st.markdown("---")
         
-        for ticker in weights.keys():
-            if ticker in prices.columns:
-                signal_data = generate_trading_signal(prices[ticker])
-                if signal_data['action'] == 'Accumulate':
-                    accumulate_list.append(f"**{ticker}** ({signal_data['confidence']:.0f}% confident)")
-                elif signal_data['action'] == 'Distribute':
-                    distribute_list.append(f"**{ticker}** ({signal_data['confidence']:.0f}% confident)")
+        # =============================================================================
+        # SECTION 2: YOUR INGREDIENTS (The Portfolio)
+        # =============================================================================
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 1.5rem; 
+                        border-radius: 10px; border-left: 5px solid #28a745; margin-bottom: 2rem;">
+                <h2 style="margin-top: 0; color: #2c3e50;">🥘 2. Your Ingredients</h2>
+                <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
+                    <strong>The Portfolio:</strong> Each ETF is an ingredient. Know what each brings to the table and its quality.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([3, 2])
+        
+        with col1:
+            # Enhanced ingredient table
+            ingredients_data = []
+            for ticker in weights.keys():
+                weight = weights[ticker]
+                
+                if ticker in prices.columns:
+                    signal_data = generate_trading_signal(prices[ticker],ticker)
+                    action = signal_data['action']
+                    
+                    ticker_returns = prices[ticker].pct_change().dropna()
+                    ticker_annual_return = (1 + ticker_returns.mean()) ** 252 - 1
+                    
+                    # Categorize
+                    if ticker in ['SPY', 'VTI', 'QQQ', 'VOO', 'VUG']:
+                        ingredient_type = "🥩 Main Course (Core Growth)"
+                    elif ticker in ['AGG', 'BND', 'TLT', 'IEF', 'SHY']:
+                        ingredient_type = "🥗 Stabilizer (Bonds)"
+                    elif ticker in ['VEA', 'VWO', 'EFA', 'IEMG', 'VXUS']:
+                        ingredient_type = "🌶️ Spice (International)"
+                    elif ticker in ['GLD', 'IAU']:
+                        ingredient_type = "🧂 Preservative (Gold)"
+                    elif ticker in ['VYM', 'SCHD', 'DVY']:
+                        ingredient_type = "💰 Dividend"
+                    else:
+                        ingredient_type = "🥄 Specialty"
+                    
+                    ingredients_data.append({
+                        'Ticker': ticker,
+                        'Type': ingredient_type,
+                        'Portion': f"{weight*100:.1f}%",
+                        'Performance': f"{ticker_annual_return*100:+.1f}%/yr",
+                        'Action': action
+                    })
+            
+            ingredients_df = pd.DataFrame(ingredients_data)
+            
+            def style_action(val):
+                if val == 'Accumulate':
+                    return 'background-color: #d4edda; color: #155724; font-weight: bold'
+                elif val == 'Distribute':
+                    return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+                elif val == 'Hold':
+                    return 'background-color: #fff3cd; color: #856404; font-weight: bold'
+                return ''
+            
+            styled_ingredients = ingredients_df.style.applymap(style_action, subset=['Action'])
+            st.dataframe(styled_ingredients, use_container_width=True, hide_index=True)
+
+
+            # Ingredient Guide
+            with st.expander("🧾 Ingredient Guide - What Each Type Does"):
+                st.markdown("""
+                **🥩 Main Course (Core Growth)** - Large-cap stocks (SPY, VTI, QQQ)  
+                → Provides primary growth. Like the protein in your meal.
+                
+                **🥗 Stabilizer (Bonds)** - Fixed income (AGG, BND, TLT)  
+                → Reduces volatility, provides steady income. Like vegetables that balance the meal.
+                
+                **🌶️ Spice (International)** - Foreign stocks (VEA, VWO, EFA)  
+                → Adds diversification and growth from other economies. Enhances flavor.
+                
+                **🧂 Preservative (Gold)** - Precious metals (GLD, IAU)  
+                → Inflation hedge, crisis insurance. Preserves value when market sours.
+                
+                **🥄 Specialty** - Sector-specific or thematic ETFs  
+                → Targeted exposure to specific themes. Special seasoning.
+                """)
+        
+        with col2:
+            # Pie chart
+            fig, ax = plt.subplots(figsize=(7, 7))
+            colors = plt.cm.Set3(range(len(weights)))
+            wedges, texts, autotexts = ax.pie(
+                weights.values(), 
+                labels=weights.keys(), 
+                autopct='%1.1f%%',
+                colors=colors, 
+                startangle=90,
+                textprops={'fontsize': 11, 'weight': 'bold'}
+            )
+            ax.set_title('Current Recipe', fontsize=14, fontweight='bold', pad=20)
+            st.pyplot(fig)
+            
+            # Quality Score
+            st.markdown("### ⭐ Overall Quality")
+            sharpe = metrics['Sharpe Ratio']
+            
+            if sharpe > 1.5:
+                quality = "Excellent"
+                emoji = "🌟🌟🌟🌟🌟"
+                color = "#030804"
+            elif sharpe > 1.0:
+                quality = "Very Good"
+                emoji = "🌟🌟🌟🌟"
+                color = "#06130f"
+            elif sharpe > 0.5:
+                quality = "Good"
+                emoji = "🌟🌟🌟"
+                color = "#0a0802"
+            elif sharpe > 0:
+                quality = "Fair"
+                emoji = "🌟🌟"
+                color = "#21140a"
+            else:
+                quality = "Needs Work"
+                emoji = "🌟"
+                color = "#130607"
+            
+            st.markdown(f"""
+                <div style="background: {color}; color: white; padding: 1.5rem; border-radius: 10px; text-align: center;">
+                    <h3 style="margin: 0; font-size: 2rem;">{emoji}</h3>
+                    <h2 style="margin: 0.5rem 0;">{quality}</h2>
+                    <p style="margin: 0; opacity: 0.9;">Sharpe Ratio: {sharpe:.2f}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # =============================================================================
+        # SECTION 3: THE RECIPE (Allocations)
+        # =============================================================================
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); padding: 1.5rem; 
+                        border-radius: 10px; border-left: 5px solid #ffc107; margin-bottom: 2rem;">
+                <h2 style="margin-top: 0; color: #2c3e50;">📖 3. The Recipe</h2>
+                <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
+                    <strong>Your Allocations:</strong> The proportions matter. Too much spice ruins the dish. 
+                    Too little and it's bland.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("#### 🎯 Current Mix")
+            
+            # Categorize holdings
+            growth_tickers = ['SPY', 'VTI', 'QQQ', 'VOO', 'VUG']
+            bond_tickers = ['AGG', 'BND', 'TLT', 'IEF', 'SHY']
+            international_tickers = ['VEA', 'VWO', 'EFA', 'IEMG', 'VXUS']
+            
+            growth_weight = sum([weights.get(t, 0) for t in growth_tickers])
+            bond_weight = sum([weights.get(t, 0) for t in bond_tickers])
+            intl_weight = sum([weights.get(t, 0) for t in international_tickers])
+            other_weight = 1 - growth_weight - bond_weight - intl_weight
+            
+            mix_df = pd.DataFrame({
+                'Category': ['🥩 Growth', '🥗 Bonds', '🌶️ International', '🥄 Other'],
+                'Weight': [
+                    f"{growth_weight*100:.1f}%",
+                    f"{bond_weight*100:.1f}%",
+                    f"{intl_weight*100:.1f}%",
+                    f"{other_weight*100:.1f}%"
+                ]
+            })
+            st.dataframe(mix_df, use_container_width=True, hide_index=True)
+        
+        with col2:
+            st.markdown("#### 🎨 Style Analysis")
+            
+            # Determine style
+            if growth_weight > 0.7:
+                style = "Aggressive Growth"
+                style_emoji = "🚀"
+                style_color = "#0f0506"
+            elif growth_weight > 0.5 and bond_weight < 0.3:
+                style = "Growth"
+                style_emoji = "📈"
+                style_color = "#180f08"
+            elif growth_weight > 0.4 and bond_weight > 0.3:
+                style = "Balanced"
+                style_emoji = "⚖️"
+                style_color = "#0e0b04"
+            elif bond_weight > 0.5:
+                style = "Conservative"
+                style_emoji = "🛡️"
+                style_color = "#040c06"
+            else:
+                style = "Custom"
+                style_emoji = "🎨"
+                style_color = "#06030b"
+            
+            st.markdown(f"""
+                <div style="background: {style_color}; color: white; padding: 1rem; border-radius: 10px; text-align: center;">
+                    <h2 style="margin: 0; font-size: 3rem;">{style_emoji}</h2>
+                    <h4 style="margin: 0.5rem 0;">{style}</h4>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("#### 💡 Recipe Tips")
+            
+            # Actionable allocation guidance
+            tips = []
+            if growth_weight > 0.8:
+                tips.append("⚠️ Very high growth allocation - consider adding stabilizers")
+            elif growth_weight < 0.3:
+                tips.append("💡 Low growth - may limit long-term returns")
+            
+            if bond_weight < 0.1 and growth_weight > 0.7:
+                tips.append("⚠️ High volatility risk - add some bonds for stability")
+            
+            if intl_weight < 0.1:
+                tips.append("🌍 Low international - missing diversification")
+            elif intl_weight > 0.4:
+                tips.append("🌍 High international exposure")
+            
+            if not tips:
+                tips.append("✅ Allocation looks reasonable")
+            
+            for tip in tips:
+                st.info(tip)
+        
+        st.markdown("---")
+        
+        # =============================================================================
+        # SECTION 4: WHEN TO ADD INGREDIENTS (Timing)
+        # =============================================================================
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); padding: 1.5rem; 
+                        border-radius: 10px; border-left: 5px solid #17a2b8; margin-bottom: 2rem;">
+                <h2 style="margin-top: 0; color: #2c3e50;">⏰ 4. When to Add Ingredients</h2>
+                <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
+                    <strong>Timing Matters:</strong> Add ingredients at the right time. Don't add salt before sugar. 
+                    Know when to accumulate and when to pull back.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 🌡️ Market Temperature")
+            
+            # Detect current market regime
+            first_ticker = list(weights.keys())[0]
+            if first_ticker in prices.columns:
+                ticker_prices = prices[first_ticker]
+                ticker_returns = ticker_prices.pct_change().dropna()
+                
+                # Calculate market metrics
+                recent_20d_return = (ticker_prices.iloc[-1] / ticker_prices.iloc[-20] - 1) * 100 if len(ticker_prices) >= 20 else 0
+                recent_60d_return = (ticker_prices.iloc[-1] / ticker_prices.iloc[-60] - 1) * 100 if len(ticker_prices) >= 60 else 0
+                vol_60d = ticker_returns.tail(60).std() * np.sqrt(252)
+                
+                # Determine temperature
+                if vol_60d > 0.35:
+                    temp = "🔥 TOO HOT"
+                    temp_desc = "Market Crisis / Panic"
+                    temp_color = "#dc3545"
+                    advice = "Step back from the stove. Don't add ingredients. Wait for market to cool."
+                elif recent_60d_return < -10 and vol_60d > 0.25:
+                    temp = "❄️ COLD"
+                    temp_desc = "Bear Market"
+                    temp_color = "#6c757d"
+                    advice = "Market cooling down. Prepare ingredients (build cash), wait for the right moment to add."
+                elif recent_60d_return > 15 and vol_60d < 0.20:
+                    temp = "🌡️ WARM & STEADY"
+                    temp_desc = "Bull Market"
+                    temp_color = "#28a745"
+                    advice = "Perfect cooking temperature! Keep adding ingredients (accumulate positions)."
+                elif recent_20d_return > 0:
+                    temp = "🌤️ WARMING UP"
+                    temp_desc = "Recovery"
+                    temp_color = "#fd7e14"
+                    advice = "Market heating up. Good time to start adding ingredients gradually."
                 else:
-                    hold_list.append(f"**{ticker}**")
+                    temp = "😐 LUKEWARM"
+                    temp_desc = "Sideways / Choppy"
+                    temp_color = "#ffc107"
+                    advice = "Market temperature uncertain. Hold current recipe, wait for clearer signals."
+                
+                st.markdown(f"""
+                    <div style="background: {temp_color}; color: white; padding: 1.5rem; border-radius: 10px; margin-bottom: 1rem;">
+                        <h2 style="margin: 0; font-size: 2rem;">{temp}</h2>
+                        <h4 style="margin: 0.5rem 0; opacity: 0.9;">{temp_desc}</h4>
+                        <p style="margin: 0.5rem 0; font-size: 0.9rem;">
+                            20-day: {recent_20d_return:+.1f}% | 60-day: {recent_60d_return:+.1f}%<br>
+                            Volatility: {vol_60d*100:.1f}%
+                        </p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                st.info(f"**👨‍🍳 Chef's Advice:** {advice}")
         
-        if accumulate_list:
-            st.markdown("**🟢 Buy More (Accumulate):**")
-            for item in accumulate_list:
-                st.markdown(f"✅ {item}")
+        with col2:
+            st.markdown("### 📋 Shopping List")
+            st.markdown("*What to accumulate or reduce based on current signals*")
+            
+            # Create shopping list
+            accumulate_list = []
+            distribute_list = []
+            hold_list = []
+            
+            for ticker in weights.keys():
+                if ticker in prices.columns:
+                    signal_data = generate_trading_signal(prices[ticker],ticker)
+                    if signal_data['action'] == 'Accumulate':
+                        accumulate_list.append(f"**{ticker}** ({signal_data['confidence']:.0f}% confident)")
+                    elif signal_data['action'] == 'Distribute':
+                        distribute_list.append(f"**{ticker}** ({signal_data['confidence']:.0f}% confident)")
+                    else:
+                        hold_list.append(f"**{ticker}**")
+            
+            if accumulate_list:
+                st.markdown("**🟢 Buy More (Accumulate):**")
+                for item in accumulate_list:
+                    st.markdown(f"✅ {item}")
+            
+            if distribute_list:
+                st.markdown("**🔴 Reduce (Distribute):**")
+                for item in distribute_list:
+                    st.markdown(f"⛔ {item}")
+            
+            if hold_list:
+                st.markdown("**🟡 Keep Current (Hold):**")
+                for item in hold_list:
+                    st.markdown(f"➖ {item}")
         
-        if distribute_list:
-            st.markdown("**🔴 Reduce (Distribute):**")
-            for item in distribute_list:
-                st.markdown(f"⛔ {item}")
+        st.markdown("---")
         
-        if hold_list:
-            st.markdown("**🟡 Keep Current (Hold):**")
-            for item in hold_list:
-                st.markdown(f"➖ {item}")
-    
-    st.markdown("---")
-    
-    # =============================================================================
-    # SECTION 5: HOW DOES IT TASTE? (Performance - ALL 8 METRICS)
-    # =============================================================================
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; 
-                    border-radius: 10px; border-left: 5px solid #2196f3; margin-bottom: 2rem;">
-            <h2 style="margin-top: 0; color: #2c3e50;">👅 5. How Does It Taste?</h2>
-            <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
-                <strong>The Results:</strong> Time to taste your creation. Does it meet your expectations?
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Calculate SPY
-    try:
-        spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
-        if spy_data is not None:
-            spy_returns = spy_data.pct_change().dropna()
-            spy_metrics = calculate_portfolio_metrics(spy_returns)
-        else:
-            spy_metrics = None
-    except:
-        spy_metrics = None
-    
-    def get_comparison_indicator(portfolio_value, spy_value, metric_type='higher_better'):
-        if spy_metrics is None:
-            return "", "white"
-        if metric_type == 'higher_better':
-            return ("🟢 ↑", "#28a745") if portfolio_value > spy_value else ("🔴 ↓", "#dc3545") if portfolio_value < spy_value else ("⚪ →", "#ffc107")
-        else:
-            return ("🟢 ↑", "#28a745") if portfolio_value < spy_value else ("🔴 ↓", "#dc3545") if portfolio_value > spy_value else ("⚪ →", "#ffc107")
-    
-    # First row of metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        metric_class = get_metric_color_class('annual_return', metrics['Annual Return'])
-        arrow, color = get_comparison_indicator(metrics['Annual Return'], spy_metrics['Annual Return'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Annual Return {arrow}</h4>
-                <h2>{metrics['Annual Return']:.2%}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Annual Return']:.2%}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('annual_return')
-    
-    with col2:
-        metric_class = get_metric_color_class('sharpe_ratio', metrics['Sharpe Ratio'])
-        arrow, color = get_comparison_indicator(metrics['Sharpe Ratio'], spy_metrics['Sharpe Ratio'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Sharpe Ratio {arrow}</h4>
-                <h2>{metrics['Sharpe Ratio']:.2f}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Sharpe Ratio']:.2f}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('sharpe_ratio')
-    
-    with col3:
-        metric_class = get_metric_color_class('max_drawdown', metrics['Max Drawdown'])
-        arrow, color = get_comparison_indicator(metrics['Max Drawdown'], spy_metrics['Max Drawdown'] if spy_metrics else 0, 'lower_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Max Drawdown {arrow}</h4>
-                <h2>{metrics['Max Drawdown']:.2%}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Max Drawdown']:.2%}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('max_drawdown')
-    
-    with col4:
-        metric_class = get_metric_color_class('volatility', metrics['Annual Volatility'])
-        arrow, color = get_comparison_indicator(metrics['Annual Volatility'], spy_metrics['Annual Volatility'] if spy_metrics else 0, 'lower_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Volatility {arrow}</h4>
-                <h2>{metrics['Annual Volatility']:.2%}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Annual Volatility']:.2%}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('volatility')
-    
-    # Second row of metrics
-    st.markdown("<br>", unsafe_allow_html=True)
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        metric_class = get_metric_color_class('sortino_ratio', metrics['Sortino Ratio'])
-        arrow, color = get_comparison_indicator(metrics['Sortino Ratio'], spy_metrics['Sortino Ratio'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Sortino Ratio {arrow}</h4>
-                <h2>{metrics['Sortino Ratio']:.2f}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Sortino Ratio']:.2f}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('sortino_ratio')
-    
-    with col2:
-        metric_class = get_metric_color_class('calmar_ratio', metrics['Calmar Ratio'])
-        arrow, color = get_comparison_indicator(metrics['Calmar Ratio'], spy_metrics['Calmar Ratio'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Calmar Ratio {arrow}</h4>
-                <h2>{metrics['Calmar Ratio']:.2f}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Calmar Ratio']:.2f}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('calmar_ratio')
-    
-    with col3:
-        metric_class = get_metric_color_class('win_rate', metrics['Win Rate'])
-        arrow, color = get_comparison_indicator(metrics['Win Rate'], spy_metrics['Win Rate'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="{metric_class}">
-                <h4>Win Rate {arrow}</h4>
-                <h2>{metrics['Win Rate']:.2%}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Win Rate']:.2%}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        render_metric_explanation('win_rate')
-    
-    with col4:
-        arrow, color = get_comparison_indicator(metrics['Total Return'], spy_metrics['Total Return'] if spy_metrics else 0, 'higher_better')
-        st.markdown(f"""
-            <div class="metric-card">
-                <h4>Total Return {arrow}</h4>
-                <h2>{metrics['Total Return']:.2%}</h2>
-                <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Total Return']:.2%}</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # Comparison legend
-    st.markdown("""
-        <div style="text-align: center; padding: 10px; margin-top: 10px; background: #f8f9fa; border-radius: 5px;">
-            <small>
-                <strong>Comparison Legend:</strong>  
-                🟢 ↑ = Better than S&P 500 | 🔴 ↓ = Worse than S&P 500 | ⚪ → = Equal
-            </small>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Performance Chart
-    st.markdown("---")
-    st.markdown("### 📈 Performance Over Time")
-    fig = plot_cumulative_returns(portfolio_returns, f'{st.session_state.current_portfolio} - Cumulative Returns')
-    st.pyplot(fig)
-    
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 What This Chart Means</div>
-            <p><strong>How to Read:</strong> Shows how $1 invested grows over time. Value of 1.5 = 50% gain.</p>
-            <p><strong>Look For:</strong> Steady upward trend = good. Sharp drops = drawdowns.</p>
-            <p><strong>Action Item:</strong> If line trends down 6+ months, consider rebalancing.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Drawdown Chart
-    st.markdown("---")
-    st.markdown("### 📉 Drawdown Analysis")
-    fig = plot_drawdown(portfolio_returns, 'Portfolio Drawdown')
-    st.pyplot(fig)
-    
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Understanding Drawdowns</div>
-            <p><strong>What This Shows:</strong> How much you're underwater from peak value.</p>
-            <p><strong>Red Flag:</strong> Drawdown exceeding -20% = bear market territory. Don't panic-sell!</p>
-            <p><strong>Psychology Check:</strong> Can you handle the deepest drawdown without selling?</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Final Verdict
-    st.markdown("---")
-    score = 0
-    if spy_metrics:
-        if metrics['Annual Return'] > spy_metrics['Annual Return']:
-            score += 1
-        if metrics['Sharpe Ratio'] > spy_metrics['Sharpe Ratio']:
-            score += 1
-        if abs(metrics['Max Drawdown']) < abs(spy_metrics['Max Drawdown']):
-            score += 1
-        if metrics['Annual Volatility'] < spy_metrics['Annual Volatility']:
-            score += 1
-    
-    if score >= 3:
-        verdict = "🌟 Excellent Recipe!"
-        verdict_color = "#28a745"
-        verdict_text = "Your portfolio is beating the market on most metrics. This is a well-balanced, high-quality recipe. Keep cooking!"
-    elif score == 2:
-        verdict = "👍 Good Recipe"
-        verdict_color = "#20c997"
-        verdict_text = "Your portfolio is competitive with the market. Some ingredients are working well. Fine-tune the recipe for even better results."
-    elif score == 1:
-        verdict = "🤔 Needs Adjustment"
-        verdict_color = "#ffc107"
-        verdict_text = "Your portfolio is underperforming on most metrics. Time to adjust the recipe - check your ingredient proportions and timing."
-    else:
-        verdict = "⚠️ Recipe Needs Work"
-        verdict_color = "#dc3545"
-        verdict_text = "Your portfolio is significantly underperforming. Consider revisiting your ingredients, proportions, and timing strategy."
-    
-    st.markdown(f"""
-        <div style="background: {verdict_color}; color: white; padding: 2rem; border-radius: 15px; text-align: center;">
-            <h1 style="margin: 0; font-size: 3rem;">{verdict}</h1>
-            <p style="font-size: 1.2rem; margin: 1rem 0 0 0; opacity: 0.95;">
-                {verdict_text}
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-
-# =============================================================================
-# TAB 2: DETAILED ANALYSIS
-# =============================================================================
-
-with tab2:
-    st.markdown("## 📊 Detailed Analysis")
-    
-    # Monthly Returns Heatmap
-    st.markdown("### 📅 Monthly Returns Heatmap")
-    fig = plot_monthly_returns_heatmap(portfolio_returns, 'Monthly Returns (%)')
-    st.pyplot(fig)
-    
-    # Heatmap interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 How to Use This Heatmap</div>
-            <p><strong>What This Shows:</strong> Each cell shows the return for that month. 
-            Green = gains, Red = losses.</p>
-            <p><strong>Patterns to Look For:</strong></p>
-            <ul>
-                <li>Seasonal trends: Some months consistently better/worse?</li>
-                <li>Streaks: 3+ consecutive red months = review needed</li>
-                <li>Year comparisons: Are recent years better or worse than historical?</li>
-            </ul>
-            <p><strong>Red Flags:</strong></p>
-            <ul>
-                <li>Entire rows of red (bad years - what happened?)</li>
-                <li>Consistent December losses (tax-loss harvesting season)</li>
-                <li>Recent months all red (time to re-evaluate strategy)</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Monthly Income/Gains Table
-    st.markdown("---")
-    st.markdown("### 💰 Monthly Income Analysis")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("**Calculate dollar gains/losses per month based on portfolio value**")
-    
-    with col2:
-        initial_capital = st.number_input(
-            "Initial Portfolio Value ($)", 
-            min_value=1000, 
-            max_value=100000000, 
-            value=100000, 
-            step=10000,
-            help="Enter your starting portfolio value to see dollar gains/losses"
-        )
-    
-    # Calculate monthly dollar gains with dividend breakdown
-    returns_series = portfolio_returns if isinstance(portfolio_returns, pd.Series) else portfolio_returns.iloc[:, 0]
-    monthly_returns = returns_series.resample('M').apply(lambda x: (1 + x).prod() - 1)
-    
-    # Estimate dividend component (approximate - based on typical dividend yields)
-    # For more accuracy, would need separate dividend data
-    # Rough estimate: ~2% annual dividend yield for typical stock portfolio
-    # Distributed across months based on return
-    monthly_data = []
-    cumulative_value = initial_capital
-    annual_dividend_yield = 0.018  # Approximate 1.8% annual yield for diversified portfolio
-    monthly_dividend_rate = annual_dividend_yield / 12
-    
-    for date, monthly_return in monthly_returns.items():
-        month_start_value = cumulative_value
-        
-        # Estimate dividend portion (rough approximation)
-        # Dividends are roughly consistent, capital gains vary
-        estimated_dividend = month_start_value * monthly_dividend_rate
-        
-        # Total dollar gain
-        total_dollar_gain = month_start_value * monthly_return
-        
-        # Capital gain = Total gain - Dividends
-        capital_gain = total_dollar_gain - estimated_dividend
-        
-        # Update cumulative value
-        cumulative_value = month_start_value + total_dollar_gain
-        
-        monthly_data.append({
-            'Date': date.strftime('%Y-%m'),
-            'Month': date.strftime('%B'),
-            'Year': date.year,
-            'Return %': monthly_return * 100,
-            'Total Gain/Loss': total_dollar_gain,
-            'Capital Gain/Loss': capital_gain,
-            'Dividend Income': estimated_dividend,
-            'Portfolio Value': cumulative_value
-        })
-    
-    monthly_df = pd.DataFrame(monthly_data)
-    
-    # Add note about dividend estimation
-    st.info("""
-        **📊 Dividend Estimation:**  
-        Dividends are estimated at ~1.8% annually (0.15% monthly) based on typical portfolio yields.  
-        For exact dividend amounts, you would need dividend-specific data from your broker.  
-        Capital gains = Total gains minus estimated dividends.
-    """)
-    
-    # Display options
-    view_option = st.radio(
-        "View:",
-        ["Last 12 Months", "Current Year", "All Time", "By Year"],
-        horizontal=True
-    )
-    
-    if view_option == "Last 12 Months":
-        display_df = monthly_df.tail(12).copy()
-    elif view_option == "Current Year":
-        current_year = datetime.now().year
-        display_df = monthly_df[monthly_df['Year'] == current_year].copy()
-    elif view_option == "By Year":
-        selected_year = st.selectbox("Select Year:", sorted(monthly_df['Year'].unique(), reverse=True))
-        display_df = monthly_df[monthly_df['Year'] == selected_year].copy()
-    else:  # All Time
-        display_df = monthly_df.copy()
-    
-    # Format for display
-    display_df['Return %'] = display_df['Return %'].apply(lambda x: f"{x:+.2f}%")
-    display_df['Total Gain/Loss'] = display_df['Total Gain/Loss'].apply(lambda x: f"${x:+,.2f}")
-    display_df['Capital Gain/Loss'] = display_df['Capital Gain/Loss'].apply(lambda x: f"${x:+,.2f}")
-    display_df['Dividend Income'] = display_df['Dividend Income'].apply(lambda x: f"${x:,.2f}")
-    display_df['Portfolio Value'] = display_df['Portfolio Value'].apply(lambda x: f"${x:,.2f}")
-    
-    st.dataframe(
-        display_df[['Date', 'Month', 'Return %', 'Capital Gain/Loss', 'Dividend Income', 'Total Gain/Loss', 'Portfolio Value']],
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    # Summary statistics with dividend breakdown
-    st.markdown("#### 📊 Income Summary")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    total_gain = monthly_df['Total Gain/Loss'].sum()
-    total_dividends = monthly_df['Dividend Income'].sum()
-    total_capital_gains = monthly_df['Capital Gain/Loss'].sum()
-    positive_months = (monthly_df['Total Gain/Loss'] > 0).sum()
-    negative_months = (monthly_df['Total Gain/Loss'] < 0).sum()
-    avg_monthly_gain = monthly_df['Total Gain/Loss'].mean()
-    
-    with col1:
-        st.metric(
-            "Total Gain/Loss",
-            f"${total_gain:,.2f}",
-            f"{((cumulative_value - initial_capital) / initial_capital * 100):+.2f}%"
-        )
-    
-    with col2:
-        st.metric(
-            "Total Dividends",
-            f"${total_dividends:,.2f}",
-            f"{(total_dividends / total_gain * 100 if total_gain > 0 else 0):.1f}% of total"
-        )
-    
-    with col3:
-        st.metric(
-            "Capital Gains",
-            f"${total_capital_gains:,.2f}",
-            f"{(total_capital_gains / total_gain * 100 if total_gain > 0 else 0):.1f}% of total"
-        )
-    
-    with col4:
-        st.metric(
-            "Positive Months",
-            f"{positive_months}",
-            f"{positive_months / len(monthly_df) * 100:.1f}%"
-        )
-    
-    with col5:
-        st.metric(
-            "Avg Monthly Gain",
-            f"${avg_monthly_gain:,.2f}"
-        )
-    
-    # Tax planning insights with dividend focus
-    st.markdown("---")
-    st.info("""
-        **💡 Tax Planning Tips (Capital Gains vs Dividends):**
-        
-        **Dividends:**
-        - **Qualified dividends**: 0%, 15%, or 20% tax rate (held >60 days)
-        - **Ordinary dividends**: Taxed as ordinary income (10-37%)
-        - **Steady income**: Dividends provide consistent monthly income
-        - **Tax efficient**: Qualified dividends taxed lower than wages
-        
-        **Capital Gains:**
-        - **Short-term** (held <1 year): Taxed as ordinary income (10-37%)
-        - **Long-term** (held >1 year): Lower rates (0%, 15%, or 20%)
-        - **Tax-loss harvesting**: Negative months can offset gains
-        - **Wash sale rule**: Can't repurchase same security within 30 days
-        
-        **Strategy Tips:**
-        - Hold dividend stocks in tax-advantaged accounts (401k, IRA) to defer taxes
-        - Harvest losses in taxable accounts to offset capital gains
-        - In retirement, qualified dividends are tax-efficient income source
-        - **Consult a CPA**: This is for planning only - not tax advice!
-    """)
-    
-    # Monthly income interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 How to Use Monthly Income Data</div>
-            <p><strong>For Retirement Planning:</strong></p>
-            <ul>
-                <li>Look at average monthly gain - is it enough to live on?</li>
-                <li>Check volatility - can you handle the negative months?</li>
-                <li>Win rate above 60% = more consistent income</li>
-            </ul>
-            <p><strong>For Tax Planning:</strong></p>
-            <ul>
-                <li>December losses? Good time to harvest for tax deduction</li>
-                <li>Big gains in one month? Might push you into higher bracket</li>
-                <li>Spread gains over multiple years if possible</li>
-            </ul>
-            <p><strong>For Strategy Evaluation:</strong></p>
-            <ul>
-                <li>Are monthly gains getting bigger or smaller over time?</li>
-                <li>Do gains cluster in certain months (seasonality)?</li>
-                <li>Can you emotionally handle the worst months?</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Rolling Metrics
-    st.markdown("---")
-    st.markdown("### 📈 Rolling Risk-Adjusted Performance")
-    window = st.slider("Rolling Window (days)", min_value=20, max_value=252, value=60, step=10)
-    fig = plot_rolling_metrics(portfolio_returns, window=window)
-    st.pyplot(fig)
-    
-    # Rolling metrics interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Understanding Rolling Metrics</div>
-            <p><strong>What This Shows:</strong> How your risk-adjusted performance changes over time.</p>
-            <p><strong>Sharpe Ratio:</strong> Measures returns vs ALL volatility</p>
-            <ul>
-                <li>Above 1.0 (green line) = Good risk-adjusted returns</li>
-                <li>Consistently above 1.0 = Sustainable strategy</li>
-                <li>Dropping toward 0 = Strategy losing effectiveness</li>
-            </ul>
-            <p><strong>Sortino Ratio:</strong> Measures returns vs DOWNSIDE volatility only</p>
-            <ul>
-                <li>Higher than Sharpe = Good! Means upside volatility is high</li>
-                <li>Much lower than Sharpe = Too many down days</li>
-            </ul>
-            <p><strong>Action Items:</strong></p>
-            <ul>
-                <li>If both metrics trend down for 3+ months, consider rebalancing</li>
-                <li>Sudden spikes after crashes = good recovery</li>
-                <li>Steady improvement = strategy working</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Distribution Analysis
-    st.markdown("---")
-    st.markdown("### 📊 Returns Distribution")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Histogram
-        fig, ax = plt.subplots(figsize=(10, 6))
-        portfolio_returns.hist(bins=50, ax=ax, color='#667eea', alpha=0.7, edgecolor='black')
-        ax.axvline(portfolio_returns.mean(), color='#28a745', linestyle='--', 
-                   linewidth=2, label=f'Mean: {portfolio_returns.mean():.4f}')
-        ax.axvline(portfolio_returns.median(), color='#ffc107', linestyle='--', 
-                   linewidth=2, label=f'Median: {portfolio_returns.median():.4f}')
-        ax.set_title('Daily Returns Distribution', fontsize=14, fontweight='bold', pad=20)
-        ax.set_xlabel('Daily Return', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Frequency', fontsize=12, fontweight='bold')
-        ax.legend(frameon=True, shadow=True)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('white')
-        st.pyplot(fig)
-    
-    with col2:
-        # QQ Plot
-        fig, ax = plt.subplots(figsize=(10, 6))
-        stats.probplot(portfolio_returns.dropna(), dist="norm", plot=ax)
-        ax.set_title('Q-Q Plot (Normal Distribution Test)', fontsize=14, fontweight='bold', pad=20)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('white')
-        st.pyplot(fig)
-    
-    # Distribution interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 What Distribution Analysis Tells You</div>
-            <p><strong>Histogram (Left):</strong></p>
-            <ul>
-                <li>Centered around 0? Good, means positive and negative days balance</li>
-                <li>Long left tail (fat negative side)? Portfolio has crash risk</li>
-                <li>Long right tail (fat positive side)? Portfolio captures big gains</li>
-            </ul>
-            <p><strong>Q-Q Plot (Right):</strong></p>
-            <ul>
-                <li>Points follow red line closely? Returns are "normal" (predictable)</li>
-                <li>Points curve away at ends? "Fat tails" = more extreme events than expected</li>
-                <li>Lower-left points below line? More severe crashes than normal distribution predicts</li>
-            </ul>
-            <p><strong>Why It Matters:</strong> Standard risk models assume normal distribution. 
-            If your returns aren't normal, you might have more risk than you think!</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-
-# =============================================================================
-# TAB 3: PYFOLIO COMPREHENSIVE ANALYSIS
-# =============================================================================
-
-with tab3:
-    st.markdown("## 📬 PyFolio Professional Analysis")
-    
-    # What is PyFolio section
-    st.markdown("""
-        <div class="info-box">
-            <h3>🎓 What is PyFolio?</h3>
-            <p><strong>PyFolio is the institutional-grade analytics library used by hedge funds, 
-            asset managers, and professional traders.</strong></p>
-            <p><strong>Created by Quantopian</strong> (a professional quant hedge fund platform), 
-            PyFolio is the SAME tool used by:</p>
-            <ul>
-                <li>📊 Hedge fund managers to evaluate their strategies</li>
-                <li>💼 Institutional investors to analyze fund performance</li>
-                <li>🏦 Asset management firms for client reporting</li>
-                <li>📈 Quantitative researchers for strategy validation</li>
-            </ul>
-            <p><strong>Why is this powerful?</strong> You're getting the EXACT same analytics 
-            that professional money managers pay thousands for. This is not "investor-lite" – 
-            this is the real deal.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # PyFolio vs Detailed Analysis
-    st.markdown("---")
-    st.markdown("### 🔬 PyFolio vs. Detailed Analysis Tab")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
+        # =============================================================================
+        # SECTION 5: HOW DOES IT TASTE? (Performance - ALL 8 METRICS)
+        # =============================================================================
         st.markdown("""
-            <div class="metric-card">
-                <h4>📊 Detailed Analysis Tab</h4>
-                <p><strong>Focus:</strong> Easy-to-understand metrics</p>
-                <p><strong>Best For:</strong></p>
-                <ul>
-                    <li>Quick performance check</li>
-                    <li>Understanding basic patterns</li>
-                    <li>Educational tooltips</li>
-                    <li>Non-expert friendly</li>
-                </ul>
-                <p><strong>Metrics:</strong> Standard risk/return metrics with explanations</p>
+            <div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; 
+                        border-radius: 10px; border-left: 5px solid #2196f3; margin-bottom: 2rem;">
+                <h2 style="margin-top: 0; color: #2c3e50;">👅 5. How Does It Taste?</h2>
+                <p style="font-size: 1.1rem; color: #555; margin-bottom: 0;">
+                    <strong>The Results:</strong> Time to taste your creation. Does it meet your expectations?
+                </p>
             </div>
         """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-            <div class="metric-card" style="border-left: 5px solid #764ba2;">
-                <h4>📬 PyFolio Analysis Tab</h4>
-                <p><strong>Focus:</strong> Professional validation</p>
-                <p><strong>Best For:</strong></p>
-                <ul>
-                    <li>Comparing to professionals</li>
-                    <li>Institutional-grade reporting</li>
-                    <li>Deep statistical analysis</li>
-                    <li>Due diligence on strategies</li>
-                </ul>
-                <p><strong>Metrics:</strong> Comprehensive tear sheets used by hedge funds</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 When to Use Each Tab</div>
-            <p><strong>Use Detailed Analysis when:</strong></p>
-            <ul>
-                <li>You want quick, easy-to-understand insights</li>
-                <li>You're learning about portfolio metrics</li>
-                <li>You need to make a quick decision</li>
-                <li>You want clear action items</li>
-            </ul>
-            <p><strong>Use PyFolio Analysis when:</strong></p>
-            <ul>
-                <li>You want to validate your strategy like a professional</li>
-                <li>You're comparing your performance to fund managers</li>
-                <li>You need comprehensive statistics for serious money decisions</li>
-                <li>You want to see if your strategy has institutional-quality metrics</li>
-                <li>You're presenting performance to sophisticated investors (family office, etc.)</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # What PyFolio Adds
-    st.markdown("---")
-    st.markdown("### 🎯 What PyFolio Adds Beyond Basic Analysis")
-    
-    st.markdown("""
-        <div class="success-box">
-            <h4>📊 Unique PyFolio Features:</h4>
-            <ol>
-                <li><strong>Rolling Beta & Sharpe:</strong> See how your market exposure changes over time</li>
-                <li><strong>Rolling Volatility:</strong> Track when your strategy gets risky</li>
-                <li><strong>Top Drawdown Periods:</strong> Identify your worst periods with exact dates</li>
-                <li><strong>Underwater Plot:</strong> Visualize how long you stayed in drawdown</li>
-                <li><strong>Monthly & Annual Returns Table:</strong> Complete historical breakdown</li>
-                <li><strong>Distribution Analysis:</strong> Advanced statistical validation</li>
-                <li><strong>Worst Drawdown Timing:</strong> Understand when pain happens</li>
-            </ol>
-            <p style="margin-top: 1rem;"><strong>The Bottom Line:</strong> PyFolio tells you if your 
-            strategy would pass institutional due diligence. If hedge funds would invest in your 
-            strategy, PyFolio will show it. If they wouldn't, PyFolio will reveal why.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Practical Decision Making Guide
-    st.markdown("---")
-    st.markdown("### 🎓 How to Use PyFolio for Real Portfolio Decisions")
-    
-    st.markdown("#### 💼 Real-World Decision Framework")
-    
-    # Scenario 1
-    st.markdown("**Scenario 1: Should I Keep This Strategy?**")
-    st.markdown("**Look for:**")
-    st.markdown("""
-    - **Rolling Sharpe Ratio:** Is it consistently above 0.5? Good sign.
-    - **Drawdown Periods:** Do you recover within 6-12 months? Acceptable.
-    - **Annual Returns Table:** More green than red years? Keep going.
-    """)
-    st.markdown("**Red Flags:**")
-    st.markdown("""
-    - Rolling Sharpe consistently below 0.3 → Strategy isn't working
-    - Drawdowns last 2+ years → Too slow to recover
-    - More losing years than winning years → Fundamental problem
-    """)
-    
-    # Scenario 2
-    st.markdown("**Scenario 2: Is My Strategy Better Than Just Buying SPY?**")
-    st.markdown("**Look for:**")
-    st.markdown("""
-    - **Compare Rolling Sharpe to SPY:** Are you consistently higher? Yes = Worth it.
-    - **Check Worst Drawdowns:** Are yours shallower than SPY's -30% to -50%? Good!
-    - **Recovery Time:** Do you bounce back faster than SPY? Excellent.
-    """)
-    st.markdown("**Decision Rule:**")
-    st.markdown("""
-    - If Rolling Sharpe less than SPY for 2+ years → Just buy SPY (simpler, cheaper)
-    - If max drawdown worse than SPY but returns aren't higher → Just buy SPY
-    - If you beat SPY on risk-adjusted basis → Keep your strategy!
-    """)
-    
-    # Scenario 3
-    st.markdown("**Scenario 3: Can I Handle More Risk?**")
-    st.markdown("**Look for:**")
-    st.markdown("""
-    - **Underwater Plot:** How long were you "underwater" (below peak)?
-    - **Top 5 Drawdowns:** Look at duration (days underwater)
-    - **Rolling Volatility:** Is it stable or spiky?
-    """)
-    st.markdown("**Decision Framework:**")
-    st.markdown("""
-    - If typical drawdown recovery is less than 6 months → You have capacity for more risk
-    - If rolling volatility is very stable → Can add more aggressive positions
-    - If you're never underwater more than 1 year → Portfolio is quite conservative
-    """)
-    
-    # Scenario 4
-    st.markdown("**Scenario 4: Presenting Performance to Financial Advisor**")
-    st.markdown("**Your advisor will look at:**")
-    st.markdown("""
-    - **Cumulative Returns vs Drawdown:** Shows risk-adjusted growth
-    - **Rolling Metrics:** Proves consistency, not luck
-    - **Worst Drawdown Periods:** Shows you survived crises
-    - **Annual Returns Table:** Detailed historical track record
-    """)
-    st.markdown("**What impresses advisors:**")
-    st.markdown("""
-    - Positive Sharpe in 2008, 2020, 2022 (crisis years)
-    - Consistent rolling Sharpe above 1.0
-    - Maximum drawdown less than 25%
-    - Fast recovery from drawdowns (under 12 months)
-    """)
-    
-    # Key Metrics to Watch
-    st.markdown("---")
-    st.markdown("### 📋 PyFolio Metrics Decoder")
-    
-    with st.expander("📊 Complete Guide to Reading PyFolio Output"):
-        st.markdown("""
-            <h4>Section 1: Cumulative Returns</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Portfolio value over time (normalized to start at 1.0)</li>
-                <li><strong>Look for:</strong> Steady upward trend with controlled drawdowns</li>
-                <li><strong>Red flag:</strong> Long flat periods or severe drops</li>
-            </ul>
-            
-            <h4>Section 2: Rolling Sharpe (6-month)</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Risk-adjusted returns over time</li>
-                <li><strong>Look for:</strong> Line consistently above 0.5, ideally above 1.0</li>
-                <li><strong>Red flag:</strong> Frequent dips below 0 (negative risk-adjusted returns)</li>
-                <li><strong>Pro tip:</strong> If this trends down over time, your strategy is degrading</li>
-            </ul>
-            
-            <h4>Section 3: Rolling Beta</h4>
-            <ul>
-                <li><strong>What it shows:</strong> How much your portfolio moves with the market</li>
-                <li><strong>Look for:</strong> Stability (beta doesn't swing wildly)</li>
-                <li><strong>Interpretation:</strong> 
-                    <ul>
-                        <li>Beta increasing over time = Taking more market risk</li>
-                        <li>Beta decreasing = Becoming more defensive</li>
-                        <li>Stable beta = Consistent strategy</li>
-                    </ul>
-                </li>
-            </ul>
-            
-            <h4>Section 4: Rolling Volatility</h4>
-            <ul>
-                <li><strong>What it shows:</strong> How much your returns fluctuate</li>
-                <li><strong>Look for:</strong> Stable line, spikes during known crisis periods only</li>
-                <li><strong>Red flag:</strong> Volatility increasing over time = Strategy becoming riskier</li>
-            </ul>
-            
-            <h4>Section 5: Top 5 Drawdown Periods</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Your worst losing periods with exact dates</li>
-                <li><strong>Look for:</strong> 
-                    <ul>
-                        <li>Drawdowns aligning with known crises (2008, 2020, 2022) = Expected</li>
-                        <li>Recovery time < 12 months = Good resilience</li>
-                    </ul>
-                </li>
-                <li><strong>Red flag:</strong> 
-                    <ul>
-                        <li>Drawdowns during bull markets = Strategy problem</li>
-                        <li>Recovery time > 24 months = Very painful</li>
-                    </ul>
-                </li>
-            </ul>
-            
-            <h4>Section 6: Underwater Plot</h4>
-            <ul>
-                <li><strong>What it shows:</strong> How far below your peak you are at any time</li>
-                <li><strong>How to read:</strong> 
-                    <ul>
-                        <li>0% = At new peak (best possible)</li>
-                        <li>-20% = 20% below your previous high</li>
-                    </ul>
-                </li>
-                <li><strong>Look for:</strong> Frequent returns to 0% (making new highs)</li>
-                <li><strong>Red flag:</strong> Long periods deep underwater = Slow recovery</li>
-            </ul>
-            
-            <h4>Section 7: Monthly Returns (%)</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Returns for every month, year by year</li>
-                <li><strong>Look for:</strong> More green (positive) than red (negative) months</li>
-                <li><strong>Pattern analysis:</strong>
-                    <ul>
-                        <li>Seasonal patterns? Some strategies work better certain times of year</li>
-                        <li>Recent years vs early years? Is performance degrading?</li>
-                        <li>Consistent bad Decembers? Could be tax-loss harvesting effect</li>
-                    </ul>
-                </li>
-            </ul>
-            
-            <h4>Section 8: Annual Returns (%)</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Total return each year</li>
-                <li><strong>Look for:</strong> Majority of years positive</li>
-                <li><strong>Key benchmark:</strong> 
-                    <ul>
-                        <li>70%+ winning years = Very good</li>
-                        <li>50-70% winning years = Good</li>
-                        <li>Below 50% = Questionable</li>
-                    </ul>
-                </li>
-            </ul>
-            
-            <h4>Section 9: Distribution Analysis</h4>
-            <ul>
-                <li><strong>What it shows:</strong> Statistical properties of your returns</li>
-                <li><strong>Look for:</strong> Relatively normal distribution (bell curve)</li>
-                <li><strong>Red flag:</strong> 
-                    <ul>
-                        <li>Fat left tail = More severe crashes than expected</li>
-                        <li>High kurtosis = More extreme events than normal</li>
-                    </ul>
-                </li>
-            </ul>
-        """, unsafe_allow_html=True)
-    
-    # Generate PyFolio Analysis
-    st.markdown("---")
-    st.markdown("### 📊 Portfolio Report Card")
-    st.markdown("""
-        **Your portfolio graded against market benchmarks.** Grading is calibrated so the S&P 500 
-        earns a solid **B grade** (since SPY beats 80% of professionals long-term). Each metric shows where  you excel and where you need improvement.
         
-        **Key:** A = Beating SPY significantly | B = SPY-level (excellent!) | C = Below SPY | D/F = Poor
-    """)
-    
-    # Calculate comprehensive metrics for grading
-    def calculate_all_metrics(returns, benchmark_returns=None):
-        """Calculate all metrics needed for grading"""
-        metrics = calculate_portfolio_metrics(returns, benchmark_returns)
-        
-        # Add additional metrics for grading
-        returns_series = returns if isinstance(returns, pd.Series) else returns.iloc[:, 0]
-        
-        # Win rate
-        win_rate = (returns_series > 0).sum() / len(returns_series)
-        
-        # Best and worst month
-        monthly_returns = returns_series.resample('M').apply(lambda x: (1 + x).prod() - 1)
-        best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
-        worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
-        
-        # Recovery time (average days to recover from drawdown)
-        cum_returns = (1 + returns_series).cumprod()
-        running_max = cum_returns.expanding().max()
-        drawdown = (cum_returns - running_max) / running_max
-        
-        # Find drawdown periods
-        in_drawdown = drawdown < 0
-        if in_drawdown.any():
-            # Calculate average recovery time
-            recovery_periods = []
-            start_dd = None
-            for i, (date, is_dd) in enumerate(in_drawdown.items()):
-                if is_dd and start_dd is None:
-                    start_dd = date
-                elif not is_dd and start_dd is not None:
-                    recovery_periods.append((date - start_dd).days)
-                    start_dd = None
-            avg_recovery_days = np.mean(recovery_periods) if recovery_periods else 0
-        else:
-            avg_recovery_days = 0
-        
-        return {
-            'Annual Return': metrics['Annual Return'],
-            'Sharpe Ratio': metrics['Sharpe Ratio'],
-            'Sortino Ratio': metrics['Sortino Ratio'],
-            'Max Drawdown': metrics['Max Drawdown'],
-            'Volatility': metrics['Annual Volatility'],
-            'Calmar Ratio': metrics['Calmar Ratio'],
-            'Win Rate': win_rate,
-            'Best Month': best_month,
-            'Worst Month': worst_month,
-            'Alpha': metrics.get('Alpha', 0),
-            'Beta': metrics.get('Beta', 1),
-            'Avg Recovery Days': avg_recovery_days
-        }
-    
-    def grade_metric(metric_name, value):
-        """
-        Grade a metric A through F based on REALISTIC market benchmarks
-        Calibrated so S&P 500 (SPY) earns a solid B grade
-        
-        Grading Philosophy:
-        - A grade = Beating S&P 500 significantly (top 20% of all strategies)
-        - B grade = S&P 500 level (market benchmark - already beats 80% of professionals!)
-        - C grade = Below market but positive
-        - D grade = Barely positive or slightly negative
-        - F grade = Significantly negative or terrible risk-adjusted returns
-        
-        Returns: (grade, explanation)
-        """
-        grading_criteria = {
-            'Annual Return': {
-                'ranges': 'A: >12%, B: 8-12%, C: 4-8%, D: 0-4%, F: <0%',
-                'A': (0.12, float('inf')),
-                'B': (0.08, 0.12),
-                'C': (0.04, 0.08),
-                'D': (0.00, 0.04),
-                'F': (-float('inf'), 0.00)
-            },
-            'Sharpe Ratio': {
-                'ranges': 'A: >1.0, B: 0.5-1.0, C: 0.2-0.5, D: 0-0.2, F: <0',
-                'A': (1.0, float('inf')),
-                'B': (0.5, 1.0),
-                'C': (0.2, 0.5),
-                'D': (0.0, 0.2),
-                'F': (-float('inf'), 0.0)
-            },
-            'Sortino Ratio': {
-                'ranges': 'A: >1.5, B: 0.9-1.5, C: 0.5-0.9, D: 0.2-0.5, F: <0.2',
-                'A': (1.5, float('inf')),
-                'B': (0.9, 1.5),
-                'C': (0.5, 0.9),
-                'D': (0.2, 0.5),
-                'F': (-float('inf'), 0.2)
-            },
-            'Max Drawdown': {
-                'ranges': 'A: >-15%, B: -15% to -25%, C: -25% to -35%, D: -35% to -50%, F: <-50%',
-                'A': (-0.15, 0),
-                'B': (-0.25, -0.15),
-                'C': (-0.35, -0.25),
-                'D': (-0.50, -0.35),
-                'F': (-float('inf'), -0.50)
-            },
-            'Volatility': {
-                'ranges': 'A: <12%, B: 12-16%, C: 16-20%, D: 20-25%, F: >25%',
-                'A': (0, 0.12),
-                'B': (0.12, 0.16),
-                'C': (0.16, 0.20),
-                'D': (0.20, 0.25),
-                'F': (0.25, float('inf'))
-            },
-            'Calmar Ratio': {
-                'ranges': 'A: >1.0, B: 0.5-1.0, C: 0.25-0.5, D: 0.1-0.25, F: <0.1',
-                'A': (1.0, float('inf')),
-                'B': (0.5, 1.0),
-                'C': (0.25, 0.5),
-                'D': (0.1, 0.25),
-                'F': (-float('inf'), 0.1)
-            },
-            'Win Rate': {
-                'ranges': 'A: >60%, B: 55-60%, C: 50-55%, D: 45-50%, F: <45%',
-                'A': (0.60, 1.0),
-                'B': (0.55, 0.60),
-                'C': (0.50, 0.55),
-                'D': (0.45, 0.50),
-                'F': (0, 0.45)
-            },
-            'Best Month': {
-                'ranges': 'A: >12%, B: 8-12%, C: 4-8%, D: 1-4%, F: <1%',
-                'A': (0.12, float('inf')),
-                'B': (0.08, 0.12),
-                'C': (0.04, 0.08),
-                'D': (0.01, 0.04),
-                'F': (-float('inf'), 0.01)
-            },
-            'Worst Month': {
-                'ranges': 'A: >-8%, B: -8% to -12%, C: -12% to -16%, D: -16% to -20%, F: <-20%',
-                'A': (-0.08, 0),
-                'B': (-0.12, -0.08),
-                'C': (-0.16, -0.12),
-                'D': (-0.20, -0.16),
-                'F': (-float('inf'), -0.20)
-            },
-            'Alpha': {
-                'ranges': 'A: >2%, B: 0.5-2%, C: -0.5% to 0.5%, D: -2% to -0.5%, F: <-2%',
-                'A': (0.02, float('inf')),
-                'B': (0.005, 0.02),
-                'C': (-0.005, 0.005),
-                'D': (-0.02, -0.005),
-                'F': (-float('inf'), -0.02)
-            },
-            'Beta': {
-                'ranges': 'A: 0.85-1.15, B: 0.7-0.85 or 1.15-1.3, C: 0.5-0.7 or 1.3-1.5, D: 0.3-0.5 or 1.5-1.7, F: <0.3 or >1.7',
-                'A': [(0.85, 1.15)],
-                'B': [(0.7, 0.85), (1.15, 1.3)],
-                'C': [(0.5, 0.7), (1.3, 1.5)],
-                'D': [(0.3, 0.5), (1.5, 1.7)],
-                'F': [(0, 0.3), (1.7, float('inf'))]
-            },
-            'Avg Recovery Days': {
-                'ranges': 'A: <120 days, B: 120-240 days, C: 240-365 days, D: 365-540 days, F: >540 days',
-                'A': (0, 120),
-                'B': (120, 240),
-                'C': (240, 365),
-                'D': (365, 540),
-                'F': (540, float('inf'))
-            }
-        }
-        
-        if metric_name not in grading_criteria:
-            return 'N/A', grading_criteria.get(metric_name, {}).get('ranges', 'N/A')
-        
-        criteria = grading_criteria[metric_name]
-        ranges_explanation = criteria['ranges']
-        
-        # Special handling for Beta (multiple ranges per grade)
-        if metric_name == 'Beta':
-            for grade in ['A', 'B', 'C', 'D', 'F']:
-                for low, high in criteria[grade]:
-                    if low <= value < high:
-                        return grade, ranges_explanation
-            return 'F', ranges_explanation
-        
-        # Standard handling for other metrics
-        for grade in ['A', 'B', 'C', 'D', 'F']:
-            low, high = criteria[grade]
-            if low <= value < high:
-                return grade, ranges_explanation
-        
-        return 'F', ranges_explanation
-    
-    def calculate_overall_grade(grades):
-        """
-        Calculate overall grade with weighting (hedge fund emphasis)
-        
-        Weighting:
-        - Sharpe Ratio: 25% (most important - risk-adjusted return)
-        - Alpha: 20% (value added vs benchmark)
-        - Max Drawdown: 15% (downside protection)
-        - Annual Return: 15% (absolute performance)
-        - Sortino Ratio: 10% (downside risk)
-        - Calmar Ratio: 5%
-        - Volatility: 5%
-        - Win Rate: 3%
-        - Beta: 2%
-        - Others: 5% combined
-        """
-        grade_points = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0, 'N/A': 2.0}
-        
-        weights = {
-            'Sharpe Ratio': 0.25,
-            'Alpha': 0.20,
-            'Max Drawdown': 0.15,
-            'Annual Return': 0.15,
-            'Sortino Ratio': 0.10,
-            'Calmar Ratio': 0.05,
-            'Volatility': 0.05,
-            'Win Rate': 0.03,
-            'Beta': 0.02
-        }
-        
-        weighted_sum = 0
-        total_weight = 0
-        
-        for metric, grade in grades.items():
-            weight = weights.get(metric, 0.005)  # Small weight for others
-            weighted_sum += grade_points.get(grade, 2.0) * weight
-            total_weight += weight
-        
-        gpa = weighted_sum / total_weight if total_weight > 0 else 2.0
-        
-        # Convert GPA to letter grade
-        if gpa >= 3.5:
-            return 'A', gpa
-        elif gpa >= 2.5:
-            return 'B', gpa
-        elif gpa >= 1.5:
-            return 'C', gpa
-        elif gpa >= 0.5:
-            return 'D', gpa
-        else:
-            return 'F', gpa
-    
-    # Calculate all metrics
-    try:
-        # Get benchmark for Alpha/Beta if available
-        benchmark_returns = None
+        # Calculate SPY
         try:
             spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
             if spy_data is not None:
-                benchmark_returns = spy_data.pct_change().dropna().iloc[:, 0]
-        except:
-            pass
-        
-        all_metrics = calculate_all_metrics(portfolio_returns, benchmark_returns)
-        
-        # Build grading table
-        grading_data = []
-        grades_dict = {}
-        
-        for metric_name, value in all_metrics.items():
-            grade, ranges = grade_metric(metric_name, value)
-            grades_dict[metric_name] = grade
-            
-            # Format value based on metric type
-            if metric_name in ['Annual Return', 'Volatility', 'Best Month', 'Worst Month', 'Alpha']:
-                formatted_value = f"{value:.2%}"
-            elif metric_name in ['Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Beta']:
-                formatted_value = f"{value:.2f}"
-            elif metric_name == 'Max Drawdown':
-                formatted_value = f"{value:.2%}"
-            elif metric_name == 'Win Rate':
-                formatted_value = f"{value:.1%}"
-            elif metric_name == 'Avg Recovery Days':
-                formatted_value = f"{value:.0f} days"
+                spy_returns = spy_data.pct_change().dropna()
+                spy_metrics = calculate_portfolio_metrics(spy_returns)
             else:
-                formatted_value = f"{value:.2f}"
+                spy_metrics = None
+        except:
+            spy_metrics = None
+        
+        def get_comparison_indicator(portfolio_value, spy_value, metric_type='higher_better'):
+            if spy_metrics is None:
+                return "", "white"
+            if metric_type == 'higher_better':
+                return ("🟢 ↑", "#28a745") if portfolio_value > spy_value else ("🔴 ↓", "#dc3545") if portfolio_value < spy_value else ("⚪ →", "#ffc107")
+            else:
+                return ("🟢 ↑", "#28a745") if portfolio_value < spy_value else ("🔴 ↓", "#dc3545") if portfolio_value > spy_value else ("⚪ →", "#ffc107")
+        
+        # First row of metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            metric_class = get_metric_color_class('annual_return', metrics['Annual Return'])
+            arrow, color = get_comparison_indicator(metrics['Annual Return'], spy_metrics['Annual Return'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Annual Return {arrow}</h4>
+                    <h2>{metrics['Annual Return']:.2%}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Annual Return']:.2%}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('annual_return')
+        
+        with col2:
+            metric_class = get_metric_color_class('sharpe_ratio', metrics['Sharpe Ratio'])
+            arrow, color = get_comparison_indicator(metrics['Sharpe Ratio'], spy_metrics['Sharpe Ratio'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Sharpe Ratio {arrow}</h4>
+                    <h2>{metrics['Sharpe Ratio']:.2f}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Sharpe Ratio']:.2f}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('sharpe_ratio')
+        
+        with col3:
+            metric_class = get_metric_color_class('max_drawdown', metrics['Max Drawdown'])
+            arrow, color = get_comparison_indicator(metrics['Max Drawdown'], spy_metrics['Max Drawdown'] if spy_metrics else 0, 'lower_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Max Drawdown {arrow}</h4>
+                    <h2>{metrics['Max Drawdown']:.2%}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Max Drawdown']:.2%}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('max_drawdown')
+        
+        with col4:
+            metric_class = get_metric_color_class('volatility', metrics['Annual Volatility'])
+            arrow, color = get_comparison_indicator(metrics['Annual Volatility'], spy_metrics['Annual Volatility'] if spy_metrics else 0, 'lower_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Volatility {arrow}</h4>
+                    <h2>{metrics['Annual Volatility']:.2%}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Annual Volatility']:.2%}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('volatility')
+        
+        # Second row of metrics
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            metric_class = get_metric_color_class('sortino_ratio', metrics['Sortino Ratio'])
+            arrow, color = get_comparison_indicator(metrics['Sortino Ratio'], spy_metrics['Sortino Ratio'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Sortino Ratio {arrow}</h4>
+                    <h2>{metrics['Sortino Ratio']:.2f}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Sortino Ratio']:.2f}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('sortino_ratio')
+        
+        with col2:
+            metric_class = get_metric_color_class('calmar_ratio', metrics['Calmar Ratio'])
+            arrow, color = get_comparison_indicator(metrics['Calmar Ratio'], spy_metrics['Calmar Ratio'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Calmar Ratio {arrow}</h4>
+                    <h2>{metrics['Calmar Ratio']:.2f}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Calmar Ratio']:.2f}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('calmar_ratio')
+        
+        with col3:
+            metric_class = get_metric_color_class('win_rate', metrics['Win Rate'])
+            arrow, color = get_comparison_indicator(metrics['Win Rate'], spy_metrics['Win Rate'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="{metric_class}">
+                    <h4>Win Rate {arrow}</h4>
+                    <h2>{metrics['Win Rate']:.2%}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Win Rate']:.2%}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            render_metric_explanation('win_rate')
+        
+        with col4:
+            arrow, color = get_comparison_indicator(metrics['Total Return'], spy_metrics['Total Return'] if spy_metrics else 0, 'higher_better')
+            st.markdown(f"""
+                <div class="metric-card">
+                    <h4>Total Return {arrow}</h4>
+                    <h2>{metrics['Total Return']:.2%}</h2>
+                    <p style="font-size: 0.9em; color: #888;">SPY: {spy_metrics['Total Return']:.2%}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Comparison legend
+        st.markdown("""
+            <div style="text-align: center; padding: 10px; margin-top: 10px; background: #f8f9fa; border-radius: 5px;">
+                <small>
+                    <strong>Comparison Legend:</strong>  
+                    🟢 ↑ = Better than S&P 500 | 🔴 ↓ = Worse than S&P 500 | ⚪ → = Equal
+                </small>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Performance Chart
+        st.markdown("---")
+        st.markdown("### 📈 Performance Over Time")
+        fig = plot_cumulative_returns(portfolio_returns, f'{st.session_state.current_portfolio} - Cumulative Returns')
+        st.pyplot(fig)
+        
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 What This Chart Means</div>
+                <p><strong>How to Read:</strong> Shows how $1 invested grows over time. Value of 1.5 = 50% gain.</p>
+                <p><strong>Look For:</strong> Steady upward trend = good. Sharp drops = drawdowns.</p>
+                <p><strong>Action Item:</strong> If line trends down 6+ months, consider rebalancing.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Drawdown Chart
+        st.markdown("---")
+        st.markdown("### 📉 Drawdown Analysis")
+        fig = plot_drawdown(portfolio_returns, 'Portfolio Drawdown')
+        st.pyplot(fig)
+        
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Understanding Drawdowns</div>
+                <p><strong>What This Shows:</strong> How much you're underwater from peak value.</p>
+                <p><strong>Red Flag:</strong> Drawdown exceeding -20% = bear market territory. Don't panic-sell!</p>
+                <p><strong>Psychology Check:</strong> Can you handle the deepest drawdown without selling?</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Final Verdict
+        st.markdown("---")
+        score = 0
+        if spy_metrics:
+            if metrics['Annual Return'] > spy_metrics['Annual Return']:
+                score += 1
+            if metrics['Sharpe Ratio'] > spy_metrics['Sharpe Ratio']:
+                score += 1
+            if abs(metrics['Max Drawdown']) < abs(spy_metrics['Max Drawdown']):
+                score += 1
+            if metrics['Annual Volatility'] < spy_metrics['Annual Volatility']:
+                score += 1
+        
+        if score >= 3:
+            verdict = "🌟 Excellent Recipe!"
+            verdict_color = "#28a745"
+            verdict_text = "Your portfolio is beating the market on most metrics. This is a well-balanced, high-quality recipe. Keep cooking!"
+        elif score == 2:
+            verdict = "👍 Good Recipe"
+            verdict_color = "#20c997"
+            verdict_text = "Your portfolio is competitive with the market. Some ingredients are working well. Fine-tune the recipe for even better results."
+        elif score == 1:
+            verdict = "🤔 Needs Adjustment"
+            verdict_color = "#ffc107"
+            verdict_text = "Your portfolio is underperforming on most metrics. Time to adjust the recipe - check your ingredient proportions and timing."
+        else:
+            verdict = "⚠️ Recipe Needs Work"
+            verdict_color = "#dc3545"
+            verdict_text = "Your portfolio is significantly underperforming. Consider revisiting your ingredients, proportions, and timing strategy."
+        
+        st.markdown(f"""
+            <div style="background: {verdict_color}; color: white; padding: 2rem; border-radius: 15px; text-align: center;">
+                <h1 style="margin: 0; font-size: 3rem;">{verdict}</h1>
+                <p style="font-size: 1.2rem; margin: 1rem 0 0 0; opacity: 0.95;">
+                    {verdict_text}
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # =============================================================================
+    # TAB 2: DETAILED ANALYSIS
+    # =============================================================================
+
+    with tab2:
+        st.markdown("## 📊 Detailed Analysis")
+        
+        # Monthly Returns Heatmap
+        st.markdown("### 📅 Monthly Returns Heatmap")
+        fig = plot_monthly_returns_heatmap(portfolio_returns, 'Monthly Returns (%)')
+        st.pyplot(fig)
+        
+        # Heatmap interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 How to Use This Heatmap</div>
+                <p><strong>What This Shows:</strong> Each cell shows the return for that month. 
+                Green = gains, Red = losses.</p>
+                <p><strong>Patterns to Look For:</strong></p>
+                <ul>
+                    <li>Seasonal trends: Some months consistently better/worse?</li>
+                    <li>Streaks: 3+ consecutive red months = review needed</li>
+                    <li>Year comparisons: Are recent years better or worse than historical?</li>
+                </ul>
+                <p><strong>Red Flags:</strong></p>
+                <ul>
+                    <li>Entire rows of red (bad years - what happened?)</li>
+                    <li>Consistent December losses (tax-loss harvesting season)</li>
+                    <li>Recent months all red (time to re-evaluate strategy)</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Monthly Income/Gains Table
+        st.markdown("---")
+        st.markdown("### 💰 Monthly Income Analysis")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("**Calculate dollar gains/losses per month based on portfolio value**")
+        
+        with col2:
+            initial_capital = st.number_input(
+                "Initial Portfolio Value ($)", 
+                min_value=1000, 
+                max_value=100000000, 
+                value=100000, 
+                step=10000,
+                help="Enter your starting portfolio value to see dollar gains/losses"
+            )
+        
+        # Calculate monthly dollar gains with dividend breakdown
+        returns_series = portfolio_returns if isinstance(portfolio_returns, pd.Series) else portfolio_returns.iloc[:, 0]
+        monthly_returns = returns_series.resample('M').apply(lambda x: (1 + x).prod() - 1)
+        
+        # Estimate dividend component (approximate - based on typical dividend yields)
+        # For more accuracy, would need separate dividend data
+        # Rough estimate: ~2% annual dividend yield for typical stock portfolio
+        # Distributed across months based on return
+        monthly_data = []
+        cumulative_value = initial_capital
+        annual_dividend_yield = 0.018  # Approximate 1.8% annual yield for diversified portfolio
+        monthly_dividend_rate = annual_dividend_yield / 12
+        
+        for date, monthly_return in monthly_returns.items():
+            month_start_value = cumulative_value
             
-            # Color code the grade
-            grade_color = {
-                'A': '🟢',
-                'B': '🟡', 
-                'C': '🟠',
-                'D': '🔴',
-                'F': '⛔'
-            }
+            # Estimate dividend portion (rough approximation)
+            # Dividends are roughly consistent, capital gains vary
+            estimated_dividend = month_start_value * monthly_dividend_rate
             
-            grading_data.append({
-                'Metric': metric_name,
-                'Grading Scale': ranges,
-                'Your Value': formatted_value,
-                'Grade': f"{grade_color.get(grade, '')} {grade}"
+            # Total dollar gain
+            total_dollar_gain = month_start_value * monthly_return
+            
+            # Capital gain = Total gain - Dividends
+            capital_gain = total_dollar_gain - estimated_dividend
+            
+            # Update cumulative value
+            cumulative_value = month_start_value + total_dollar_gain
+            
+            monthly_data.append({
+                'Date': date.strftime('%Y-%m'),
+                'Month': date.strftime('%B'),
+                'Year': date.year,
+                'Return %': monthly_return * 100,
+                'Total Gain/Loss': total_dollar_gain,
+                'Capital Gain/Loss': capital_gain,
+                'Dividend Income': estimated_dividend,
+                'Portfolio Value': cumulative_value
             })
         
-        # Calculate overall grade
-        overall_letter, gpa = calculate_overall_grade(grades_dict)
+        monthly_df = pd.DataFrame(monthly_data)
         
-        # Display the table
-        grading_df = pd.DataFrame(grading_data)
+        # Add note about dividend estimation
+        st.info("""
+            **📊 Dividend Estimation:**  
+            Dividends are estimated at ~1.8% annually (0.15% monthly) based on typical portfolio yields.  
+            For exact dividend amounts, you would need dividend-specific data from your broker.  
+            Capital gains = Total gains minus estimated dividends.
+        """)
         
-        # Style the dataframe
+        # Display options
+        view_option = st.radio(
+            "View:",
+            ["Last 12 Months", "Current Year", "All Time", "By Year"],
+            horizontal=True
+        )
+        
+        if view_option == "Last 12 Months":
+            display_df = monthly_df.tail(12).copy()
+        elif view_option == "Current Year":
+            current_year = datetime.now().year
+            display_df = monthly_df[monthly_df['Year'] == current_year].copy()
+        elif view_option == "By Year":
+            selected_year = st.selectbox("Select Year:", sorted(monthly_df['Year'].unique(), reverse=True))
+            display_df = monthly_df[monthly_df['Year'] == selected_year].copy()
+        else:  # All Time
+            display_df = monthly_df.copy()
+        
+        # Format for display
+        display_df['Return %'] = display_df['Return %'].apply(lambda x: f"{x:+.2f}%")
+        display_df['Total Gain/Loss'] = display_df['Total Gain/Loss'].apply(lambda x: f"${x:+,.2f}")
+        display_df['Capital Gain/Loss'] = display_df['Capital Gain/Loss'].apply(lambda x: f"${x:+,.2f}")
+        display_df['Dividend Income'] = display_df['Dividend Income'].apply(lambda x: f"${x:,.2f}")
+        display_df['Portfolio Value'] = display_df['Portfolio Value'].apply(lambda x: f"${x:,.2f}")
+        
         st.dataframe(
-            grading_df,
+            display_df[['Date', 'Month', 'Return %', 'Capital Gain/Loss', 'Dividend Income', 'Total Gain/Loss', 'Portfolio Value']],
             use_container_width=True,
             hide_index=True
         )
         
-        # Overall Grade Display
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1, 2, 1])
+        # Summary statistics with dividend breakdown
+        st.markdown("#### 📊 Income Summary")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        total_gain = monthly_df['Total Gain/Loss'].sum()
+        total_dividends = monthly_df['Dividend Income'].sum()
+        total_capital_gains = monthly_df['Capital Gain/Loss'].sum()
+        positive_months = (monthly_df['Total Gain/Loss'] > 0).sum()
+        negative_months = (monthly_df['Total Gain/Loss'] < 0).sum()
+        avg_monthly_gain = monthly_df['Total Gain/Loss'].mean()
+        
+        with col1:
+            st.metric(
+                "Total Gain/Loss",
+                f"${total_gain:,.2f}",
+                f"{((cumulative_value - initial_capital) / initial_capital * 100):+.2f}%"
+            )
         
         with col2:
-            grade_color_map = {
-                'A': 'success',
-                'B': 'info',
-                'C': 'warning',
-                'D': 'error',
-                'F': 'error'
-            }
-            
-            grade_emoji = {
-                'A': '🏆',
-                'B': '✅',
-                'C': '⚠️',
-                'D': '❌',
-                'F': '⛔'
-            }
-            
-            grade_message = {
-                'A': 'Outstanding! You are beating the S&P 500 - doing better than 80%+ of professionals!',
-                'B': 'Excellent! S&P 500 level performance (already beats 80% of professionals long-term).',
-                'C': 'Below Market. Consider if active management is worth the effort vs. just buying SPY.',
-                'D': 'Significantly Below Market. Strategy needs major improvement.',
-                'F': 'Poor Performance. Switch to index funds (SPY/VOO) - simpler and better.'
-            }
-            
-            st.markdown(f"""
-                <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                border-radius: 15px; color: white;">
-                    <h1 style="margin: 0; font-size: 4rem;">{grade_emoji[overall_letter]}</h1>
-                    <h2 style="margin: 0.5rem 0;">Overall Grade: {overall_letter}</h2>
-                    <p style="margin: 0; font-size: 1.2rem;">GPA: {gpa:.2f} / 4.0</p>
-                    <p style="margin-top: 1rem; font-size: 1.1rem;">{grade_message[overall_letter]}</p>
-                </div>
-            """, unsafe_allow_html=True)
+            st.metric(
+                "Total Dividends",
+                f"${total_dividends:,.2f}",
+                f"{(total_dividends / total_gain * 100 if total_gain > 0 else 0):.1f}% of total"
+            )
         
-        # Grade interpretation
+        with col3:
+            st.metric(
+                "Capital Gains",
+                f"${total_capital_gains:,.2f}",
+                f"{(total_capital_gains / total_gain * 100 if total_gain > 0 else 0):.1f}% of total"
+            )
+        
+        with col4:
+            st.metric(
+                "Positive Months",
+                f"{positive_months}",
+                f"{positive_months / len(monthly_df) * 100:.1f}%"
+            )
+        
+        with col5:
+            st.metric(
+                "Avg Monthly Gain",
+                f"${avg_monthly_gain:,.2f}"
+            )
+        
+        # Tax planning insights with dividend focus
         st.markdown("---")
-        st.markdown("#### 📖 Understanding Your Grades")
+        st.info("""
+            **💡 Tax Planning Tips (Capital Gains vs Dividends):**
+            
+            **Dividends:**
+            - **Qualified dividends**: 0%, 15%, or 20% tax rate (held >60 days)
+            - **Ordinary dividends**: Taxed as ordinary income (10-37%)
+            - **Steady income**: Dividends provide consistent monthly income
+            - **Tax efficient**: Qualified dividends taxed lower than wages
+            
+            **Capital Gains:**
+            - **Short-term** (held <1 year): Taxed as ordinary income (10-37%)
+            - **Long-term** (held >1 year): Lower rates (0%, 15%, or 20%)
+            - **Tax-loss harvesting**: Negative months can offset gains
+            - **Wash sale rule**: Can't repurchase same security within 30 days
+            
+            **Strategy Tips:**
+            - Hold dividend stocks in tax-advantaged accounts (401k, IRA) to defer taxes
+            - Harvest losses in taxable accounts to offset capital gains
+            - In retirement, qualified dividends are tax-efficient income source
+            - **Consult a CPA**: This is for planning only - not tax advice!
+        """)
+        
+        # Monthly income interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 How to Use Monthly Income Data</div>
+                <p><strong>For Retirement Planning:</strong></p>
+                <ul>
+                    <li>Look at average monthly gain - is it enough to live on?</li>
+                    <li>Check volatility - can you handle the negative months?</li>
+                    <li>Win rate above 60% = more consistent income</li>
+                </ul>
+                <p><strong>For Tax Planning:</strong></p>
+                <ul>
+                    <li>December losses? Good time to harvest for tax deduction</li>
+                    <li>Big gains in one month? Might push you into higher bracket</li>
+                    <li>Spread gains over multiple years if possible</li>
+                </ul>
+                <p><strong>For Strategy Evaluation:</strong></p>
+                <ul>
+                    <li>Are monthly gains getting bigger or smaller over time?</li>
+                    <li>Do gains cluster in certain months (seasonality)?</li>
+                    <li>Can you emotionally handle the worst months?</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Rolling Metrics
+        st.markdown("---")
+        st.markdown("### 📈 Rolling Risk-Adjusted Performance")
+        window = st.slider("Rolling Window (days)", min_value=20, max_value=252, value=60, step=10)
+        fig = plot_rolling_metrics(portfolio_returns, window=window)
+        st.pyplot(fig)
+        
+        # Rolling metrics interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Understanding Rolling Metrics</div>
+                <p><strong>What This Shows:</strong> How your risk-adjusted performance changes over time.</p>
+                <p><strong>Sharpe Ratio:</strong> Measures returns vs ALL volatility</p>
+                <ul>
+                    <li>Above 1.0 (green line) = Good risk-adjusted returns</li>
+                    <li>Consistently above 1.0 = Sustainable strategy</li>
+                    <li>Dropping toward 0 = Strategy losing effectiveness</li>
+                </ul>
+                <p><strong>Sortino Ratio:</strong> Measures returns vs DOWNSIDE volatility only</p>
+                <ul>
+                    <li>Higher than Sharpe = Good! Means upside volatility is high</li>
+                    <li>Much lower than Sharpe = Too many down days</li>
+                </ul>
+                <p><strong>Action Items:</strong></p>
+                <ul>
+                    <li>If both metrics trend down for 3+ months, consider rebalancing</li>
+                    <li>Sudden spikes after crashes = good recovery</li>
+                    <li>Steady improvement = strategy working</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Distribution Analysis
+        st.markdown("---")
+        st.markdown("### 📊 Returns Distribution")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Histogram
+            fig, ax = plt.subplots(figsize=(10, 6))
+            portfolio_returns.hist(bins=50, ax=ax, color='#667eea', alpha=0.7, edgecolor='black')
+            ax.axvline(portfolio_returns.mean(), color='#28a745', linestyle='--', 
+                    linewidth=2, label=f'Mean: {portfolio_returns.mean():.4f}')
+            ax.axvline(portfolio_returns.median(), color='#ffc107', linestyle='--', 
+                    linewidth=2, label=f'Median: {portfolio_returns.median():.4f}')
+            ax.set_title('Daily Returns Distribution', fontsize=14, fontweight='bold', pad=20)
+            ax.set_xlabel('Daily Return', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Frequency', fontsize=12, fontweight='bold')
+            ax.legend(frameon=True, shadow=True)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('white')
+            st.pyplot(fig)
+        
+        with col2:
+            # QQ Plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            stats.probplot(portfolio_returns.dropna(), dist="norm", plot=ax)
+            ax.set_title('Q-Q Plot (Normal Distribution Test)', fontsize=14, fontweight='bold', pad=20)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('white')
+            st.pyplot(fig)
+        
+        # Distribution interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 What Distribution Analysis Tells You</div>
+                <p><strong>Histogram (Left):</strong></p>
+                <ul>
+                    <li>Centered around 0? Good, means positive and negative days balance</li>
+                    <li>Long left tail (fat negative side)? Portfolio has crash risk</li>
+                    <li>Long right tail (fat positive side)? Portfolio captures big gains</li>
+                </ul>
+                <p><strong>Q-Q Plot (Right):</strong></p>
+                <ul>
+                    <li>Points follow red line closely? Returns are "normal" (predictable)</li>
+                    <li>Points curve away at ends? "Fat tails" = more extreme events than expected</li>
+                    <li>Lower-left points below line? More severe crashes than normal distribution predicts</li>
+                </ul>
+                <p><strong>Why It Matters:</strong> Standard risk models assume normal distribution. 
+                If your returns aren't normal, you might have more risk than you think!</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+
+    # =============================================================================
+    # TAB 3: PYFOLIO COMPREHENSIVE ANALYSIS
+    # =============================================================================
+
+    with tab3:
+        st.markdown("## 📬 PyFolio Professional Analysis")
+        
+        # What is PyFolio section
+        st.markdown("""
+            <div class="info-box">
+                <h3>🎓 What is PyFolio?</h3>
+                <p><strong>PyFolio is the institutional-grade analytics library used by hedge funds, 
+                asset managers, and professional traders.</strong></p>
+                <p><strong>Created by Quantopian</strong> (a professional quant hedge fund platform), 
+                PyFolio is the SAME tool used by:</p>
+                <ul>
+                    <li>📊 Hedge fund managers to evaluate their strategies</li>
+                    <li>💼 Institutional investors to analyze fund performance</li>
+                    <li>🏦 Asset management firms for client reporting</li>
+                    <li>📈 Quantitative researchers for strategy validation</li>
+                </ul>
+                <p><strong>Why is this powerful?</strong> You're getting the EXACT same analytics 
+                that professional money managers pay thousands for. This is not "investor-lite" – 
+                this is the real deal.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # PyFolio vs Detailed Analysis
+        st.markdown("---")
+        st.markdown("### 🔬 PyFolio vs. Detailed Analysis Tab")
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("""
-                **Grade Scale (Calibrated to S&P 500 = B):**
-                - 🟢 **A (4.0):** Beating S&P 500 - You're outperforming 80%+ of professionals!
-                - 🟡 **B (3.0):** S&P 500 level - Excellent (beats 80% of pros long-term)
-                - 🟠 **C (2.0):** Below market - Consider switching to SPY
-                - 🔴 **D (1.0):** Significantly below market - Needs major changes
-                - ⛔ **F (0.0):** Poor - Just buy SPY/VOO instead
-                
-                **Remember:** Getting a B means you're doing as well as the best long-term 
-                investment! Most active managers fail to achieve this.
-            """)
-        
-        with col2:
-            st.markdown("""
-                **Overall Grade Weighting (Hedge Fund Standard):**
-                - Sharpe Ratio: 25% (Risk-adjusted returns)
-                - Alpha: 20% (Value added vs. market)
-                - Max Drawdown: 15% (Downside protection)
-                - Annual Return: 15% (Absolute performance)
-                - Other metrics: 25% (Sortino, Calmar, etc.)
-            """)
-        
-        # Action items based on grade
-        st.markdown("---")
-        st.markdown("#### 🎯 What Your Grade Means for Action")
-        
-        if overall_letter == 'A':
-            st.success("""
-                **Grade A - Outstanding Performance!**
-                
-                ✅ **What to do:**
-                - Document this performance (you're beating professionals!)
-                - Maintain current strategy with quarterly rebalancing
-                - Consider if you can handle slight increase in risk for potentially higher returns
-                - Share this report card with your financial advisor
-                
-                ⚠️ **Caution:**
-                - Don't get overconfident - markets change
-                - Ensure you can still handle the max drawdown emotionally
-                - Monitor for strategy degradation (check rolling Sharpe)
-            """)
-        elif overall_letter == 'B':
-            st.info("""
-                **Grade B - Very Good Performance!**
-                
-                ✅ **What to do:**
-                - You're beating most professionals - well done!
-                - Look for specific C or D grades to improve
-                - Continue current strategy with confidence
-                - Monitor monthly to ensure performance persists
-                
-                💡 **Improvement Areas:**
-                - Check which metrics are C or below
-                - Consider minor optimization (Tab 7)
-                - Compare to benchmarks (Tab 6) for validation
-            """)
-        elif overall_letter == 'C':
-            st.warning("""
-                **Grade C - Acceptable but Room for Improvement**
-                
-                ⚠️ **What to do:**
-                - Review metrics graded D or F - these need attention
-                - Compare to simple strategies (60/40, SPY)
-                - Consider if complexity is worth the effort
-                - Use Tab 7 (Optimization) to explore improvements
-                
-                🔍 **Key Questions:**
-                - Are you beating SPY? If not, why not just buy SPY?
-                - Is your Sharpe Ratio > 0.5? If not, too much risk for return
-                - Can you emotionally handle the max drawdown?
-            """)
-        else:  # D or F
-            st.error("""
-                **Grade D/F - Performance Needs Major Improvement**
-                
-                🚨 **Immediate Actions:**
-                1. **Stop and reassess** - Don't throw good money after bad
-                2. **Check Tab 6** - Are you underperforming simple strategies?
-                3. **Review Tab 4** - Are you in wrong regime for your strategy?
-                4. **Consider alternatives:**
-                   - Switch to 60/40 portfolio (simple, proven)
-                   - Buy SPY index fund (beats 80% of pros long-term)
-                   - Hire a professional advisor
-                
-                ⚠️ **Reality Check:**
-                - If multiple metrics are F, strategy is fundamentally flawed
-                - Don't let losses compound - cut losses and restart
-                - Sometimes simplest solution (index funds) is best
-            """)
-        
-    except Exception as e:
-        st.error(f"Error calculating portfolio grades: {str(e)}")
-        st.info("Ensure your portfolio has sufficient data for grading (6+ months recommended)")
-    
-    # Generate PyFolio Analysis
-    st.markdown("---")
-    st.markdown("### 📈 Your Professional Tear Sheet")
-    
-    try:
-        # Ensure returns is a Series with datetime index
-        returns_series = portfolio_returns.copy()
-        if isinstance(returns_series, pd.DataFrame):
-            returns_series = returns_series.iloc[:, 0]
-        
-        with st.spinner("Generating institutional-grade analytics..."):
-            fig = pf.create_returns_tear_sheet(returns_series, return_fig=True)
-            if fig is not None:
-                st.pyplot(fig)
-            else:
-                st.warning("Could not generate returns tear sheet")
-        
-        st.markdown("#### 💡 How to Interpret Your Results")
-        st.markdown("**Quick Assessment (30 seconds):**")
-        st.markdown("""
-        1. Look at Annual Returns table → Are most years positive? ✅ or ❌
-        2. Check Rolling Sharpe → Is it mostly above 0.5? ✅ or ❌
-        3. Review Top 5 Drawdowns → Do you recover within 12 months? ✅ or ❌
-        """)
-        
-        st.success("**If all three are ✅:** You have an institutionally-valid strategy!")
-        st.warning("**If any are ❌:** Review the specific section above to understand what needs improvement.")
-        
-        st.markdown("**Next Steps:**")
-        st.markdown("""
-        - **If metrics are strong:** Document this analysis! You now have proof 
-          your strategy works at a professional level.
-        - **If metrics are weak:** Use Tab 7 (Optimization) to explore improvements, 
-          or consider a simpler approach (60/40 or SPY).
-        - **If metrics are mixed:** Identify the specific weakness (e.g., slow recovery, 
-          high volatility) and adjust your allocation accordingly.
-        """)
-        
-        # Professional comparison
-        st.markdown("---")
-        st.markdown("### 🏆 How Do You Compare to Professionals?")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("""
                 <div class="metric-card">
-                    <h4>Hedge Fund Benchmark</h4>
-                    <p><strong>Typical Performance:</strong></p>
+                    <h4>📊 Detailed Analysis Tab</h4>
+                    <p><strong>Focus:</strong> Easy-to-understand metrics</p>
+                    <p><strong>Best For:</strong></p>
                     <ul>
-                        <li>Annual Return: 8-12%</li>
-                        <li>Sharpe Ratio: 0.8-1.5</li>
-                        <li>Max Drawdown: -15% to -25%</li>
-                        <li>Win Rate: 60-70%</li>
+                        <li>Quick performance check</li>
+                        <li>Understanding basic patterns</li>
+                        <li>Educational tooltips</li>
+                        <li>Non-expert friendly</li>
                     </ul>
-                    <p style="font-size: 0.9rem; margin-top: 1rem;">
-                    <em>If you beat these, you're performing at hedge fund level!</em></p>
+                    <p><strong>Metrics:</strong> Standard risk/return metrics with explanations</p>
                 </div>
             """, unsafe_allow_html=True)
         
         with col2:
             st.markdown("""
-                <div class="metric-card">
-                    <h4>Warren Buffett Benchmark</h4>
-                    <p><strong>Berkshire Hathaway:</strong></p>
+                <div class="metric-card" style="border-left: 5px solid #764ba2;">
+                    <h4>📬 PyFolio Analysis Tab</h4>
+                    <p><strong>Focus:</strong> Professional validation</p>
+                    <p><strong>Best For:</strong></p>
                     <ul>
-                        <li>Annual Return: ~20% (historical)</li>
-                        <li>Sharpe Ratio: ~0.8</li>
-                        <li>Max Drawdown: -50% (2008)</li>
-                        <li>Win Rate: ~70%</li>
+                        <li>Comparing to professionals</li>
+                        <li>Institutional-grade reporting</li>
+                        <li>Deep statistical analysis</li>
+                        <li>Due diligence on strategies</li>
                     </ul>
-                    <p style="font-size: 0.9rem; margin-top: 1rem;">
-                    <em>Even Buffett has had severe drawdowns. You're in good company.</em></p>
+                    <p><strong>Metrics:</strong> Comprehensive tear sheets used by hedge funds</p>
                 </div>
             """, unsafe_allow_html=True)
         
-        with col3:
-            st.markdown("""
-                <div class="metric-card">
-                    <h4>S&P 500 Benchmark</h4>
-                    <p><strong>Index Performance:</strong></p>
-                    <ul>
-                        <li>Annual Return: ~10%</li>
-                        <li>Sharpe Ratio: ~0.5-0.7</li>
-                        <li>Max Drawdown: -56% (2008)</li>
-                        <li>Win Rate: ~55%</li>
-                    </ul>
-                    <p style="font-size: 0.9rem; margin-top: 1rem;">
-                    <em>If you can't beat this, just buy SPY. That's okay!</em></p>
-                </div>
-            """, unsafe_allow_html=True)
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 When to Use Each Tab</div>
+                <p><strong>Use Detailed Analysis when:</strong></p>
+                <ul>
+                    <li>You want quick, easy-to-understand insights</li>
+                    <li>You're learning about portfolio metrics</li>
+                    <li>You need to make a quick decision</li>
+                    <li>You want clear action items</li>
+                </ul>
+                <p><strong>Use PyFolio Analysis when:</strong></p>
+                <ul>
+                    <li>You want to validate your strategy like a professional</li>
+                    <li>You're comparing your performance to fund managers</li>
+                    <li>You need comprehensive statistics for serious money decisions</li>
+                    <li>You want to see if your strategy has institutional-quality metrics</li>
+                    <li>You're presenting performance to sophisticated investors (family office, etc.)</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # What PyFolio Adds
+        st.markdown("---")
+        st.markdown("### 🎯 What PyFolio Adds Beyond Basic Analysis")
         
         st.markdown("""
             <div class="success-box">
-                <h4>🎯 Reality Check</h4>
-                <p><strong>Professional investors fail to beat SPY 80-90% of the time over 10+ years.</strong></p>
-                <p>If your PyFolio tear sheet shows you beating SPY on a risk-adjusted basis (Sharpe ratio), 
-                you're doing better than most professionals. Be proud of that!</p>
-                <p><strong>Key Insight:</strong> It's not about having the highest returns. It's about having 
-                good risk-adjusted returns that you can stick with through market cycles. PyFolio shows you 
-                if your strategy is sustainable long-term.</p>
+                <h4>📊 Unique PyFolio Features:</h4>
+                <ol>
+                    <li><strong>Rolling Beta & Sharpe:</strong> See how your market exposure changes over time</li>
+                    <li><strong>Rolling Volatility:</strong> Track when your strategy gets risky</li>
+                    <li><strong>Top Drawdown Periods:</strong> Identify your worst periods with exact dates</li>
+                    <li><strong>Underwater Plot:</strong> Visualize how long you stayed in drawdown</li>
+                    <li><strong>Monthly & Annual Returns Table:</strong> Complete historical breakdown</li>
+                    <li><strong>Distribution Analysis:</strong> Advanced statistical validation</li>
+                    <li><strong>Worst Drawdown Timing:</strong> Understand when pain happens</li>
+                </ol>
+                <p style="margin-top: 1rem;"><strong>The Bottom Line:</strong> PyFolio tells you if your 
+                strategy would pass institutional due diligence. If hedge funds would invest in your 
+                strategy, PyFolio will show it. If they wouldn't, PyFolio will reveal why.</p>
             </div>
         """, unsafe_allow_html=True)
         
-    except Exception as e:
-        st.error(f"Error generating PyFolio analysis: {str(e)}")
-        st.info("Note: PyFolio requires sufficient historical data (typically 6+ months)")
+        # Practical Decision Making Guide
+        st.markdown("---")
+        st.markdown("### 🎓 How to Use PyFolio for Real Portfolio Decisions")
         
+        st.markdown("#### 💼 Real-World Decision Framework")
+        
+        # Scenario 1
+        st.markdown("**Scenario 1: Should I Keep This Strategy?**")
+        st.markdown("**Look for:**")
         st.markdown("""
-            <div class="warning-box">
-                <h4>⚠️ Troubleshooting</h4>
-                <p>If PyFolio fails to generate:</p>
+        - **Rolling Sharpe Ratio:** Is it consistently above 0.5? Good sign.
+        - **Drawdown Periods:** Do you recover within 6-12 months? Acceptable.
+        - **Annual Returns Table:** More green than red years? Keep going.
+        """)
+        st.markdown("**Red Flags:**")
+        st.markdown("""
+        - Rolling Sharpe consistently below 0.3 → Strategy isn't working
+        - Drawdowns last 2+ years → Too slow to recover
+        - More losing years than winning years → Fundamental problem
+        """)
+        
+        # Scenario 2
+        st.markdown("**Scenario 2: Is My Strategy Better Than Just Buying SPY?**")
+        st.markdown("**Look for:**")
+        st.markdown("""
+        - **Compare Rolling Sharpe to SPY:** Are you consistently higher? Yes = Worth it.
+        - **Check Worst Drawdowns:** Are yours shallower than SPY's -30% to -50%? Good!
+        - **Recovery Time:** Do you bounce back faster than SPY? Excellent.
+        """)
+        st.markdown("**Decision Rule:**")
+        st.markdown("""
+        - If Rolling Sharpe less than SPY for 2+ years → Just buy SPY (simpler, cheaper)
+        - If max drawdown worse than SPY but returns aren't higher → Just buy SPY
+        - If you beat SPY on risk-adjusted basis → Keep your strategy!
+        """)
+        
+        # Scenario 3
+        st.markdown("**Scenario 3: Can I Handle More Risk?**")
+        st.markdown("**Look for:**")
+        st.markdown("""
+        - **Underwater Plot:** How long were you "underwater" (below peak)?
+        - **Top 5 Drawdowns:** Look at duration (days underwater)
+        - **Rolling Volatility:** Is it stable or spiky?
+        """)
+        st.markdown("**Decision Framework:**")
+        st.markdown("""
+        - If typical drawdown recovery is less than 6 months → You have capacity for more risk
+        - If rolling volatility is very stable → Can add more aggressive positions
+        - If you're never underwater more than 1 year → Portfolio is quite conservative
+        """)
+        
+        # Scenario 4
+        st.markdown("**Scenario 4: Presenting Performance to Financial Advisor**")
+        st.markdown("**Your advisor will look at:**")
+        st.markdown("""
+        - **Cumulative Returns vs Drawdown:** Shows risk-adjusted growth
+        - **Rolling Metrics:** Proves consistency, not luck
+        - **Worst Drawdown Periods:** Shows you survived crises
+        - **Annual Returns Table:** Detailed historical track record
+        """)
+        st.markdown("**What impresses advisors:**")
+        st.markdown("""
+        - Positive Sharpe in 2008, 2020, 2022 (crisis years)
+        - Consistent rolling Sharpe above 1.0
+        - Maximum drawdown less than 25%
+        - Fast recovery from drawdowns (under 12 months)
+        """)
+        
+        # Key Metrics to Watch
+        st.markdown("---")
+        st.markdown("### 📋 PyFolio Metrics Decoder")
+        
+        with st.expander("📊 Complete Guide to Reading PyFolio Output"):
+            st.markdown("""
+                <h4>Section 1: Cumulative Returns</h4>
                 <ul>
-                    <li>Ensure you have at least 6 months of data</li>
-                    <li>Check that your portfolio has daily returns</li>
-                    <li>Verify date range includes sufficient trading days</li>
+                    <li><strong>What it shows:</strong> Portfolio value over time (normalized to start at 1.0)</li>
+                    <li><strong>Look for:</strong> Steady upward trend with controlled drawdowns</li>
+                    <li><strong>Red flag:</strong> Long flat periods or severe drops</li>
                 </ul>
-            </div>
-        """, unsafe_allow_html=True)
-
-
-# =============================================================================
-# TAB 4: MARKET REGIMES (NEW!)
-# =============================================================================
-
-with tab4:
-    st.markdown("## 🌡️ Market Conditions & Regime Analysis")
-    st.markdown("""
-        <div class="info-box">
-            <h4>What Are Market Regimes?</h4>
-            <p>Markets behave differently in different conditions. Understanding which "regime" 
-            you're in helps you know if your strategy is working as expected.</p>
-            <p><strong>The 5 Regimes:</strong></p>
-            <ol>
-                <li><strong>🟢 Bull Market (Low Vol):</strong> Goldilocks - steady gains, low stress</li>
-                <li><strong>🔵 Bull Market (High Vol):</strong> Winning but volatile - gains with anxiety</li>
-                <li><strong>🟡 Sideways/Choppy:</strong> Going nowhere - range-bound, frustrating</li>
-                <li><strong>🟠 Bear Market (Low Vol):</strong> Slow bleed - gradual decline</li>
-                <li><strong>🔴 Bear Market (High Vol):</strong> Crisis mode - crashes and panic</li>
-            </ol>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Detect regimes
-    with st.spinner("Analyzing market regimes..."):
-        regimes = detect_market_regimes(portfolio_returns, lookback=60)
-        regime_stats = analyze_regime_performance(portfolio_returns, regimes)
-    
-    # Current Regime
-    st.markdown("---")
-    st.markdown("### 🎯 Current Market Regime")
-    current_regime = regimes.iloc[-1]
-    
-    regime_colors = {
-        'Bull Market (Low Vol)': '#28a745',
-        'Bull Market (High Vol)': '#17a2b8',
-        'Sideways/Choppy': '#ffc107',
-        'Bear Market (Low Vol)': '#fd7e14',
-        'Bear Market (High Vol)': '#dc3545'
-    }
-    
-    regime_descriptions = {
-        'Bull Market (Low Vol)': {
-            'emoji': '🟢',
-            'status': 'Excellent',
-            'description': 'Best conditions for investing. Steady gains with low stress. Stay invested!',
-            'action': 'Maintain current allocation. Consider adding to positions on minor dips.'
-        },
-        'Bull Market (High Vol)': {
-            'emoji': '🔵',
-            'status': 'Good but Volatile',
-            'description': 'Making gains but with bumpy ride. Normal during strong growth phases.',
-            'action': 'Stay the course. Volatility is creating buying opportunities. Don\'t sell on dips.'
-        },
-        'Sideways/Choppy': {
-            'emoji': '🟡',
-            'status': 'Neutral',
-            'description': 'Market is range-bound. Frustrating but not dangerous.',
-            'action': 'Be patient. Avoid chasing momentum. Good time for rebalancing.'
-        },
-        'Bear Market (Low Vol)': {
-            'emoji': '🟠',
-            'status': 'Caution',
-            'description': 'Slow grind lower. Early warning sign of potential trouble.',
-            'action': 'Review portfolio. Consider raising cash or adding defensive positions.'
-        },
-        'Bear Market (High Vol)': {
-            'emoji': '🔴',
-            'status': 'Crisis Mode',
-            'description': 'High stress period with significant losses. Historically temporary.',
-            'action': 'DO NOT PANIC SELL! Historically the best buying opportunity. Deep breaths.'
-        }
-    }
-    
-    regime_info = regime_descriptions[current_regime]
-    
-    st.markdown(f"""
-        <div class="metric-card" style="border-left: 5px solid {regime_colors[current_regime]};">
-            <h2>{regime_info['emoji']} {current_regime}</h2>
-            <h3>Status: {regime_info['status']}</h3>
-            <p style="font-size: 1.1rem; margin-top: 1rem;"><strong>What This Means:</strong> 
-            {regime_info['description']}</p>
-            <p style="font-size: 1.1rem; margin-top: 1rem;"><strong>🎯 Action Item:</strong> 
-            {regime_info['action']}</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Regime Timeline
-    st.markdown("---")
-    st.markdown("### 📊 Regime Timeline & Performance")
-    fig = plot_regime_chart(regimes, portfolio_returns)
-    st.pyplot(fig)
-    
-    # Regime timeline interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 How to Read the Regime Chart</div>
-            <p><strong>Top Chart:</strong> Your portfolio value with colored backgrounds showing regimes</p>
-            <p><strong>Bottom Chart:</strong> Timeline of regime changes</p>
-            <p><strong>Key Insights to Look For:</strong></p>
-            <ul>
-                <li><strong>Big gains in green zones:</strong> Portfolio is working as designed</li>
-                <li><strong>Losses in red zones:</strong> Expected, but how bad compared to benchmark?</li>
-                <li><strong>Flat in yellow zones:</strong> Your capital is idle - frustrating but safe</li>
-                <li><strong>Quick regime switches:</strong> Market is uncertain, be careful</li>
-                <li><strong>Long red zones:</strong> True bear markets - historical best buying opportunity</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Performance by Regime
-    st.markdown("---")
-    st.markdown("### 📈 Performance by Regime")
-    
-    # Format the dataframe for display
-    regime_stats_display = regime_stats.copy()
-    regime_stats_display['Avg Daily Return'] = regime_stats_display['Avg Daily Return'].apply(lambda x: f"{x:.4f}")
-    regime_stats_display['Volatility'] = regime_stats_display['Volatility'].apply(lambda x: f"{x:.2%}")
-    regime_stats_display['Best Day'] = regime_stats_display['Best Day'].apply(lambda x: f"{x:.2%}")
-    regime_stats_display['Worst Day'] = regime_stats_display['Worst Day'].apply(lambda x: f"{x:.2%}")
-    regime_stats_display['Win Rate'] = regime_stats_display['Win Rate'].apply(lambda x: f"{x:.2%}")
-    
-    # Color-code the table
-    def color_regime(val):
-        color = regime_colors.get(val, '#f8f9fa')
-        return f'background-color: {color}; color: white; font-weight: bold'
-    
-    styled_df = regime_stats_display.style.applymap(
-        color_regime, subset=['Regime']
-    )
-    
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    
-    # Regime performance interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 How to Use Regime Performance Data</div>
-            <p><strong>What Each Column Means:</strong></p>
-            <ul>
-                <li><strong>Occurrences:</strong> How many days in each regime</li>
-                <li><strong>Avg Daily Return:</strong> Typical daily move in that regime</li>
-                <li><strong>Volatility:</strong> Annualized volatility (stress level)</li>
-                <li><strong>Best/Worst Day:</strong> Extreme moves to expect</li>
-                <li><strong>Win Rate:</strong> % of positive days</li>
-            </ul>
-            <p><strong>Key Questions to Ask:</strong></p>
-            <ul>
-                <li>Do you make money in bull markets? (You should!)</li>
-                <li>How bad are losses in bear markets vs benchmark?</li>
-                <li>Is volatility acceptable in each regime?</li>
-                <li>Win rate > 50% in bull markets? Good sign.</li>
-                <li>Win rate < 40% in bear markets? Portfolio may need defensive assets.</li>
-            </ul>
-            <p><strong>🚩 Red Flags:</strong></p>
-            <ul>
-                <li>Negative returns in Bull Market (Low Vol) - strategy is broken</li>
-                <li>Higher losses in Bear Market (High Vol) than benchmark - insufficient protection</li>
-                <li>Low win rate across all regimes - strategy is too volatile for you</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-
-
-# =============================================================================
-# TAB 5: FORWARD-LOOKING RISK ANALYSIS (NEW!)
-# =============================================================================
-
-with tab5:
-    st.markdown("## 🔮 Forward-Looking Risk Analysis")
-    st.markdown("""
-        <div class="warning-box">
-            <h4>⚠️ Important Disclaimer</h4>
-            <p><strong>Past performance does not guarantee future results.</strong> 
-            This analysis projects future risks based on historical behavior, but markets can change.</p>
-            <p>Use these projections as one tool among many for decision-making, not as a crystal ball.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Calculate forward-looking metrics
-    with st.spinner("Running forward-looking analysis..."):
-        forward_metrics = calculate_forward_risk_metrics(portfolio_returns)
-    
-    # Expected Metrics
-    st.markdown("---")
-    st.markdown("### 📊 Expected Performance (Next 12 Months)")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        expected_return = forward_metrics['Expected Annual Return']
-        color_class = 'metric-excellent' if expected_return > 0.10 else 'metric-good' if expected_return > 0.05 else 'metric-fair'
-        st.markdown(f"""
-            <div class="{color_class}">
-                <h4>Expected Return</h4>
-                <h2>{expected_return:.2%}</h2>
-                <p style="margin-top: 0.5rem;">Based on historical avg</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        expected_vol = forward_metrics['Expected Volatility']
-        color_class = 'metric-excellent' if expected_vol < 0.15 else 'metric-good' if expected_vol < 0.20 else 'metric-fair'
-        st.markdown(f"""
-            <div class="{color_class}">
-                <h4>Expected Volatility</h4>
-                <h2>{expected_vol:.2%}</h2>
-                <p style="margin-top: 0.5rem;">Expected fluctuation</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        prob_loss = forward_metrics['Probability of Daily Loss']
-        color_class = 'metric-excellent' if prob_loss < 0.40 else 'metric-good' if prob_loss < 0.45 else 'metric-fair'
-        st.markdown(f"""
-            <div class="{color_class}">
-                <h4>Daily Loss Probability</h4>
-                <h2>{prob_loss:.1%}</h2>
-                <p style="margin-top: 0.5rem;">Chance of down day</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        est_max_dd = forward_metrics['Estimated Max Drawdown']
-        color_class = 'metric-excellent' if est_max_dd > -0.15 else 'metric-good' if est_max_dd > -0.25 else 'metric-poor'
-        st.markdown(f"""
-            <div class="{color_class}">
-                <h4>Est. Max Drawdown</h4>
-                <h2>{est_max_dd:.2%}</h2>
-                <p style="margin-top: 0.5rem;">Worst case scenario</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # Risk Metrics
-    st.markdown("---")
-    st.markdown("### 🎯 Value at Risk (VaR) Analysis")
-    st.markdown("""
-        <div class="info-box">
-            <p><strong>Value at Risk (VaR)</strong> answers: "How much could I lose on a bad day?"</p>
-            <p><strong>Conditional VaR (CVaR)</strong> answers: "If that bad day happens, how much worse could it get?"</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 95% Confidence Level")
-        var_95 = forward_metrics['VaR (95%)']
-        cvar_95 = forward_metrics['CVaR (95%)']
-        
-        st.markdown(f"""
-            <div class="metric-card">
-                <h4>VaR (95%)</h4>
-                <h2>{var_95:.2%}</h2>
-                <p style="margin-top: 1rem;">
-                <strong>What this means:</strong> On 95% of days, your loss won't be worse than this.
-                Or said differently: Only 1 in 20 days (5%) will be worse than this.
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div class="metric-card" style="margin-top: 1rem;">
-                <h4>CVaR (95%)</h4>
-                <h2>{cvar_95:.2%}</h2>
-                <p style="margin-top: 1rem;">
-                <strong>What this means:</strong> On those 5% worst days, this is the AVERAGE loss.
-                This is your "expected bad day" loss.
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("#### 99% Confidence Level")
-        var_99 = forward_metrics['VaR (99%)']
-        cvar_99 = forward_metrics['CVaR (99%)']
-        
-        st.markdown(f"""
-            <div class="metric-card">
-                <h4>VaR (99%)</h4>
-                <h2>{var_99:.2%}</h2>
-                <p style="margin-top: 1rem;">
-                <strong>What this means:</strong> On 99% of days, your loss won't be worse than this.
-                Only 1 in 100 days (1%) will be worse.
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div class="metric-card" style="margin-top: 1rem;">
-                <h4>CVaR (99%)</h4>
-                <h2>{cvar_99:.2%}</h2>
-                <p style="margin-top: 1rem;">
-                <strong>What this means:</strong> On those 1% worst days, this is the AVERAGE loss.
-                This is your "tail risk" exposure.
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # VaR interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 How to Use VaR in Real Life</div>
-            <p><strong>Example with $100,000 Portfolio:</strong></p>
-            <ul>
-                <li>VaR (95%) = -2.5% → On 95% of days, you'll lose less than $2,500</li>
-                <li>CVaR (95%) = -3.5% → On the 5% worst days, average loss is $3,500</li>
-                <li>VaR (99%) = -4.0% → Only 1% of days lose more than $4,000</li>
-                <li>CVaR (99%) = -5.5% → On the very worst 1% of days, average loss is $5,500</li>
-            </ul>
-            <p><strong>Questions to Ask Yourself:</strong></p>
-            <ul>
-                <li>Can I emotionally handle the CVaR (95%) loss regularly?</li>
-                <li>Can I financially survive the CVaR (99%) loss?</li>
-                <li>Do I have enough liquidity to avoid selling at a loss?</li>
-            </ul>
-            <p><strong>🚩 Red Flags:</strong></p>
-            <ul>
-                <li>CVaR (95%) > -5%: You'll experience painful days frequently</li>
-                <li>CVaR (99%) > -10%: Your worst days are VERY bad</li>
-                <li>If these numbers scare you, your portfolio is too aggressive</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Monte Carlo Simulation
-    st.markdown("---")
-    st.markdown("### 🎲 Monte Carlo Simulation (1 Year Forward)")
-    st.markdown("""
-        <div class="info-box">
-            <p><strong>What is Monte Carlo?</strong> We run 1,000+ possible future scenarios based on your 
-            portfolio's historical behavior. This shows the range of possible outcomes.</p>
-            <p><strong>How to read:</strong> The fan of lines shows possible paths. The colored lines show 
-            key percentiles (5th to 95th). The wider the fan, the more uncertain the future.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    with st.spinner("Running Monte Carlo simulation (this may take a moment)..."):
-        simulations = monte_carlo_simulation(portfolio_returns, days_forward=252, num_simulations=1000)
-    
-    fig = plot_monte_carlo_simulation(simulations)
-    st.pyplot(fig)
-    
-    # Monte Carlo interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Understanding Monte Carlo Results</div>
-            <p><strong>The Lines Explained:</strong></p>
-            <ul>
-                <li><strong>Green (50th %ile):</strong> Median outcome - "most likely" path</li>
-                <li><strong>Dark Blue (25th & 75th %ile):</strong> "Typical" range of outcomes</li>
-                <li><strong>Orange (5th %ile):</strong> Bad luck scenario - 95% chance of doing better</li>
-                <li><strong>Gray (95th %ile):</strong> Good luck scenario - 95% chance of doing worse</li>
-            </ul>
-            <p><strong>What to Look For:</strong></p>
-            <ul>
-                <li><strong>Wide fan:</strong> High uncertainty, hard to predict</li>
-                <li><strong>Narrow fan:</strong> More predictable outcomes</li>
-                <li><strong>Most lines above 1.0:</strong> Positive expected returns</li>
-                <li><strong>5th %ile below 0.85:</strong> Significant risk of 15%+ loss</li>
-            </ul>
-            <p><strong>Real-World Use:</strong></p>
-            <ul>
-                <li>Planning to retire next year? Look at 5th percentile - can you afford that outcome?</li>
-                <li>Young investor? Focus on median and 75th percentile - you have time</li>
-                <li>Need the money in 1 year? If 25th percentile is below 0.95, you have risk</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Scenario Analysis
-    st.markdown("---")
-    st.markdown("### 📊 Scenario Analysis (1 Year Forward)")
-    
-    final_values = simulations[-1, :]
-    scenarios = {
-        'Best Case (95th %ile)': np.percentile(final_values, 95),
-        'Good Case (75th %ile)': np.percentile(final_values, 75),
-        'Median Case (50th %ile)': np.percentile(final_values, 50),
-        'Bad Case (25th %ile)': np.percentile(final_values, 25),
-        'Worst Case (5th %ile)': np.percentile(final_values, 5)
-    }
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        scenario_df = pd.DataFrame({
-            'Scenario': scenarios.keys(),
-            'Portfolio Value': [f"${v:.2f}" for v in scenarios.values()],
-            'Return': [f"{(v-1)*100:.1f}%" for v in scenarios.values()]
-        })
-        st.dataframe(scenario_df, use_container_width=True, hide_index=True)
-    
-    with col2:
-        st.markdown("""
-            <div class="metric-card">
-                <h4>Probability Analysis</h4>
-                <p style="margin-top: 1rem;">
-                    <strong>Make Money:</strong><br>
-                    {:.1f}% chance<br><br>
-                    <strong>Lose Money:</strong><br>
-                    {:.1f}% chance<br><br>
-                    <strong>Lose > 10%:</strong><br>
-                    {:.1f}% chance
-                </p>
-            </div>
-        """.format(
-            (final_values > 1.0).sum() / len(final_values) * 100,
-            (final_values < 1.0).sum() / len(final_values) * 100,
-            (final_values < 0.9).sum() / len(final_values) * 100
-        ), unsafe_allow_html=True)
-    
-    # Scenario interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Using Scenarios for Decision-Making</div>
-            <p><strong>Example: Planning with $100,000</strong></p>
-            <ul>
-                <li><strong>Best Case:</strong> Portfolio grows to $115,000 (15% gain) - Happy days!</li>
-                <li><strong>Median Case:</strong> Portfolio grows to $107,000 (7% gain) - Acceptable</li>
-                <li><strong>Worst Case:</strong> Portfolio drops to $92,000 (8% loss) - Ouch, but survivable?</li>
-            </ul>
-            <p><strong>Decision Framework:</strong></p>
-            <ul>
-                <li><strong>Can't afford worst case?</strong> Portfolio is too aggressive. Add bonds/cash.</li>
-                <li><strong>Comfortable with worst case?</strong> You're properly positioned.</li>
-                <li><strong>Disappointed by median case?</strong> Need more risk for your goals.</li>
-            </ul>
-            <p><strong>Important Reality Check:</strong></p>
-            <ul>
-                <li>These scenarios assume historical patterns continue</li>
-                <li>Black swan events (2008, COVID) can exceed worst case</li>
-                <li>Keep 6-12 months expenses in cash regardless of scenarios</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-
-
-# =============================================================================
-# TAB 6: COMPARE BENCHMARKS (ENHANCED WITH SMART SELECTION)
-# =============================================================================
-
-with tab6:
-    st.markdown("## ⚖️ Compare Against Benchmarks")
-    
-    st.info("""
-        **🎯 Smart Benchmark Selection:** Benchmarks are auto-selected based on your portfolio composition.
-        This ensures you're comparing against the most relevant indices rather than generic ones.
-    """)
-    
-    # Get smart benchmark recommendations
-    smart_benchmarks = get_smart_benchmarks(list(weights.keys()), list(weights.values()))
-    
-    # Display recommended benchmarks
-    st.markdown("### 📊 Auto-Selected Benchmarks")
-    
-    benchmark_info = []
-    for benchmark, reason in smart_benchmarks:
-        benchmark_info.append({
-            'Benchmark': benchmark,
-            'Reason': reason
-        })
-    
-    if benchmark_info:
-        st.dataframe(pd.DataFrame(benchmark_info), use_container_width=True, hide_index=True)
-    
-    # Allow manual additions
-    st.markdown("#### ➕ Add Additional Benchmarks (Optional)")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    additional_benchmarks = []
-    with col1:
-        if st.checkbox("QQQ (Nasdaq 100)", value=False, help="Tech-heavy index"):
-            additional_benchmarks.append(('QQQ', 'Nasdaq 100 comparison'))
-    with col2:
-        if st.checkbox("IWM (Russell 2000)", value=False, help="Small cap index"):
-            additional_benchmarks.append(('IWM', 'Small cap comparison'))
-    with col3:
-        if st.checkbox("VT (Total World)", value=False, help="Global stocks"):
-            additional_benchmarks.append(('VT', 'Global market comparison'))
-    with col4:
-        if st.checkbox("AGG (Total Bond)", value=False, help="Bond market"):
-            additional_benchmarks.append(('AGG', 'Bond market comparison'))
-    
-    # Combine smart and additional benchmarks
-    all_benchmarks = smart_benchmarks + additional_benchmarks
-    
-    # Download benchmark data
-    benchmarks_data = {}
-    benchmarks_metrics = {}
-    
-    for benchmark_symbol, reason in all_benchmarks:
-        if benchmark_symbol == '60/40':
-            # Create synthetic 60/40 portfolio
-            spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
-            agg_data = download_ticker_data(['AGG'], current['start_date'], current['end_date'])
-            
-            if spy_data is not None and agg_data is not None:
-                combined_data = pd.DataFrame({
-                    'SPY': spy_data.iloc[:, 0] if isinstance(spy_data, pd.DataFrame) else spy_data,
-                    'AGG': agg_data.iloc[:, 0] if isinstance(agg_data, pd.DataFrame) else agg_data
-                }).dropna()
                 
-                portfolio_6040 = calculate_portfolio_returns(combined_data, np.array([0.6, 0.4]))
-                benchmarks_data['60/40'] = portfolio_6040
-                benchmarks_metrics['60/40'] = calculate_portfolio_metrics(portfolio_6040)
-        else:
-            # Download single benchmark
-            bench_data = get_benchmark_data_openbb(benchmark_symbol, current['start_date'], current['end_date'])
-            if bench_data is not None:
-                bench_returns = bench_data.pct_change().dropna()
-                bench_returns_series = bench_returns.iloc[:, 0] if isinstance(bench_returns, pd.DataFrame) else bench_returns
-                benchmarks_data[benchmark_symbol] = bench_returns_series
-                benchmarks_metrics[benchmark_symbol] = calculate_portfolio_metrics(bench_returns_series)
-    
-    if not benchmarks_data:
-        st.warning("⚠️ Could not load benchmark data. Please check your internet connection.")
-    else:
-        # Enhanced Metrics Comparison Table
+                <h4>Section 2: Rolling Sharpe (6-month)</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> Risk-adjusted returns over time</li>
+                    <li><strong>Look for:</strong> Line consistently above 0.5, ideally above 1.0</li>
+                    <li><strong>Red flag:</strong> Frequent dips below 0 (negative risk-adjusted returns)</li>
+                    <li><strong>Pro tip:</strong> If this trends down over time, your strategy is degrading</li>
+                </ul>
+                
+                <h4>Section 3: Rolling Beta</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> How much your portfolio moves with the market</li>
+                    <li><strong>Look for:</strong> Stability (beta doesn't swing wildly)</li>
+                    <li><strong>Interpretation:</strong> 
+                        <ul>
+                            <li>Beta increasing over time = Taking more market risk</li>
+                            <li>Beta decreasing = Becoming more defensive</li>
+                            <li>Stable beta = Consistent strategy</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h4>Section 4: Rolling Volatility</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> How much your returns fluctuate</li>
+                    <li><strong>Look for:</strong> Stable line, spikes during known crisis periods only</li>
+                    <li><strong>Red flag:</strong> Volatility increasing over time = Strategy becoming riskier</li>
+                </ul>
+                
+                <h4>Section 5: Top 5 Drawdown Periods</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> Your worst losing periods with exact dates</li>
+                    <li><strong>Look for:</strong> 
+                        <ul>
+                            <li>Drawdowns aligning with known crises (2008, 2020, 2022) = Expected</li>
+                            <li>Recovery time < 12 months = Good resilience</li>
+                        </ul>
+                    </li>
+                    <li><strong>Red flag:</strong> 
+                        <ul>
+                            <li>Drawdowns during bull markets = Strategy problem</li>
+                            <li>Recovery time > 24 months = Very painful</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h4>Section 6: Underwater Plot</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> How far below your peak you are at any time</li>
+                    <li><strong>How to read:</strong> 
+                        <ul>
+                            <li>0% = At new peak (best possible)</li>
+                            <li>-20% = 20% below your previous high</li>
+                        </ul>
+                    </li>
+                    <li><strong>Look for:</strong> Frequent returns to 0% (making new highs)</li>
+                    <li><strong>Red flag:</strong> Long periods deep underwater = Slow recovery</li>
+                </ul>
+                
+                <h4>Section 7: Monthly Returns (%)</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> Returns for every month, year by year</li>
+                    <li><strong>Look for:</strong> More green (positive) than red (negative) months</li>
+                    <li><strong>Pattern analysis:</strong>
+                        <ul>
+                            <li>Seasonal patterns? Some strategies work better certain times of year</li>
+                            <li>Recent years vs early years? Is performance degrading?</li>
+                            <li>Consistent bad Decembers? Could be tax-loss harvesting effect</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h4>Section 8: Annual Returns (%)</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> Total return each year</li>
+                    <li><strong>Look for:</strong> Majority of years positive</li>
+                    <li><strong>Key benchmark:</strong> 
+                        <ul>
+                            <li>70%+ winning years = Very good</li>
+                            <li>50-70% winning years = Good</li>
+                            <li>Below 50% = Questionable</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h4>Section 9: Distribution Analysis</h4>
+                <ul>
+                    <li><strong>What it shows:</strong> Statistical properties of your returns</li>
+                    <li><strong>Look for:</strong> Relatively normal distribution (bell curve)</li>
+                    <li><strong>Red flag:</strong> 
+                        <ul>
+                            <li>Fat left tail = More severe crashes than expected</li>
+                            <li>High kurtosis = More extreme events than normal</li>
+                        </ul>
+                    </li>
+                </ul>
+            """, unsafe_allow_html=True)
+        
+        # Generate PyFolio Analysis
         st.markdown("---")
-        st.markdown("### 📊 Comprehensive Metrics Comparison")
-        
-        comparison_rows = []
-        
-        # Key metrics to compare
-        metric_configs = [
-            ('Annual Return', 'Annual Return', 'higher_better', '%'),
-            ('Sharpe Ratio', 'Sharpe Ratio', 'higher_better', 'ratio'),
-            ('Sortino Ratio', 'Sortino Ratio', 'higher_better', 'ratio'),
-            ('Max Drawdown', 'Max Drawdown', 'lower_better', '%'),
-            ('Volatility', 'Annual Volatility', 'higher_better', '%'),
-            ('Calmar Ratio', 'Calmar Ratio', 'higher_better', 'ratio'),
-            ('Total Return', 'Total Return', 'higher_better', '%')
-        ]
-        
-        for metric_display, metric_key, comparison_type, format_type in metric_configs:
-            row = {'Metric': metric_display}
+        st.markdown("### 📊 Portfolio Report Card")
+        st.markdown("""
+            **Your portfolio graded against market benchmarks.** Grading is calibrated so the S&P 500 
+            earns a solid **B grade** (since SPY beats 80% of professionals long-term). Each metric shows where  you excel and where you need improvement.
             
-            # Add portfolio value
-            port_value = metrics[metric_key]
-            if format_type == '%':
-                row['Your Portfolio'] = f"{port_value:.2%}"
+            **Key:** A = Beating SPY significantly | B = SPY-level (excellent!) | C = Below SPY | D/F = Poor
+        """)
+        
+        # Calculate comprehensive metrics for grading
+        def calculate_all_metrics(returns, benchmark_returns=None):
+            """Calculate all metrics needed for grading"""
+            metrics = calculate_portfolio_metrics(returns, benchmark_returns)
+            
+            # Add additional metrics for grading
+            returns_series = returns if isinstance(returns, pd.Series) else returns.iloc[:, 0]
+            
+            # Win rate
+            win_rate = (returns_series > 0).sum() / len(returns_series)
+            
+            # Best and worst month
+            monthly_returns = returns_series.resample('M').apply(lambda x: (1 + x).prod() - 1)
+            best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
+            worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
+            
+            # Recovery time (average days to recover from drawdown)
+            cum_returns = (1 + returns_series).cumprod()
+            running_max = cum_returns.expanding().max()
+            drawdown = (cum_returns - running_max) / running_max
+            
+            # Find drawdown periods
+            in_drawdown = drawdown < 0
+            if in_drawdown.any():
+                # Calculate average recovery time
+                recovery_periods = []
+                start_dd = None
+                for i, (date, is_dd) in enumerate(in_drawdown.items()):
+                    if is_dd and start_dd is None:
+                        start_dd = date
+                    elif not is_dd and start_dd is not None:
+                        recovery_periods.append((date - start_dd).days)
+                        start_dd = None
+                avg_recovery_days = np.mean(recovery_periods) if recovery_periods else 0
             else:
-                row['Your Portfolio'] = f"{port_value:.2f}"
+                avg_recovery_days = 0
             
-            # Add benchmark values with comparison arrows
-            for bench_name, bench_metrics in benchmarks_metrics.items():
-                bench_value = bench_metrics[metric_key]
+            return {
+                'Annual Return': metrics['Annual Return'],
+                'Sharpe Ratio': metrics['Sharpe Ratio'],
+                'Sortino Ratio': metrics['Sortino Ratio'],
+                'Max Drawdown': metrics['Max Drawdown'],
+                'Volatility': metrics['Annual Volatility'],
+                'Calmar Ratio': metrics['Calmar Ratio'],
+                'Win Rate': win_rate,
+                'Best Month': best_month,
+                'Worst Month': worst_month,
+                'Alpha': metrics.get('Alpha', 0),
+                'Beta': metrics.get('Beta', 1),
+                'Avg Recovery Days': avg_recovery_days
+            }
+        
+        def grade_metric(metric_name, value):
+            """
+            Grade a metric A through F based on REALISTIC market benchmarks
+            Calibrated so S&P 500 (SPY) earns a solid B grade
+            
+            Grading Philosophy:
+            - A grade = Beating S&P 500 significantly (top 20% of all strategies)
+            - B grade = S&P 500 level (market benchmark - already beats 80% of professionals!)
+            - C grade = Below market but positive
+            - D grade = Barely positive or slightly negative
+            - F grade = Significantly negative or terrible risk-adjusted returns
+            
+            Returns: (grade, explanation)
+            """
+            grading_criteria = {
+                'Annual Return': {
+                    'ranges': 'A: >12%, B: 8-12%, C: 4-8%, D: 0-4%, F: <0%',
+                    'A': (0.12, float('inf')),
+                    'B': (0.08, 0.12),
+                    'C': (0.04, 0.08),
+                    'D': (0.00, 0.04),
+                    'F': (-float('inf'), 0.00)
+                },
+                'Sharpe Ratio': {
+                    'ranges': 'A: >1.0, B: 0.5-1.0, C: 0.2-0.5, D: 0-0.2, F: <0',
+                    'A': (1.0, float('inf')),
+                    'B': (0.5, 1.0),
+                    'C': (0.2, 0.5),
+                    'D': (0.0, 0.2),
+                    'F': (-float('inf'), 0.0)
+                },
+                'Sortino Ratio': {
+                    'ranges': 'A: >1.5, B: 0.9-1.5, C: 0.5-0.9, D: 0.2-0.5, F: <0.2',
+                    'A': (1.5, float('inf')),
+                    'B': (0.9, 1.5),
+                    'C': (0.5, 0.9),
+                    'D': (0.2, 0.5),
+                    'F': (-float('inf'), 0.2)
+                },
+                'Max Drawdown': {
+                    'ranges': 'A: >-15%, B: -15% to -25%, C: -25% to -35%, D: -35% to -50%, F: <-50%',
+                    'A': (-0.15, 0),
+                    'B': (-0.25, -0.15),
+                    'C': (-0.35, -0.25),
+                    'D': (-0.50, -0.35),
+                    'F': (-float('inf'), -0.50)
+                },
+                'Volatility': {
+                    'ranges': 'A: <12%, B: 12-16%, C: 16-20%, D: 20-25%, F: >25%',
+                    'A': (0, 0.12),
+                    'B': (0.12, 0.16),
+                    'C': (0.16, 0.20),
+                    'D': (0.20, 0.25),
+                    'F': (0.25, float('inf'))
+                },
+                'Calmar Ratio': {
+                    'ranges': 'A: >1.0, B: 0.5-1.0, C: 0.25-0.5, D: 0.1-0.25, F: <0.1',
+                    'A': (1.0, float('inf')),
+                    'B': (0.5, 1.0),
+                    'C': (0.25, 0.5),
+                    'D': (0.1, 0.25),
+                    'F': (-float('inf'), 0.1)
+                },
+                'Win Rate': {
+                    'ranges': 'A: >60%, B: 55-60%, C: 50-55%, D: 45-50%, F: <45%',
+                    'A': (0.60, 1.0),
+                    'B': (0.55, 0.60),
+                    'C': (0.50, 0.55),
+                    'D': (0.45, 0.50),
+                    'F': (0, 0.45)
+                },
+                'Best Month': {
+                    'ranges': 'A: >12%, B: 8-12%, C: 4-8%, D: 1-4%, F: <1%',
+                    'A': (0.12, float('inf')),
+                    'B': (0.08, 0.12),
+                    'C': (0.04, 0.08),
+                    'D': (0.01, 0.04),
+                    'F': (-float('inf'), 0.01)
+                },
+                'Worst Month': {
+                    'ranges': 'A: >-8%, B: -8% to -12%, C: -12% to -16%, D: -16% to -20%, F: <-20%',
+                    'A': (-0.08, 0),
+                    'B': (-0.12, -0.08),
+                    'C': (-0.16, -0.12),
+                    'D': (-0.20, -0.16),
+                    'F': (-float('inf'), -0.20)
+                },
+                'Alpha': {
+                    'ranges': 'A: >2%, B: 0.5-2%, C: -0.5% to 0.5%, D: -2% to -0.5%, F: <-2%',
+                    'A': (0.02, float('inf')),
+                    'B': (0.005, 0.02),
+                    'C': (-0.005, 0.005),
+                    'D': (-0.02, -0.005),
+                    'F': (-float('inf'), -0.02)
+                },
+                'Beta': {
+                    'ranges': 'A: 0.85-1.15, B: 0.7-0.85 or 1.15-1.3, C: 0.5-0.7 or 1.3-1.5, D: 0.3-0.5 or 1.5-1.7, F: <0.3 or >1.7',
+                    'A': [(0.85, 1.15)],
+                    'B': [(0.7, 0.85), (1.15, 1.3)],
+                    'C': [(0.5, 0.7), (1.3, 1.5)],
+                    'D': [(0.3, 0.5), (1.5, 1.7)],
+                    'F': [(0, 0.3), (1.7, float('inf'))]
+                },
+                'Avg Recovery Days': {
+                    'ranges': 'A: <120 days, B: 120-240 days, C: 240-365 days, D: 365-540 days, F: >540 days',
+                    'A': (0, 120),
+                    'B': (120, 240),
+                    'C': (240, 365),
+                    'D': (365, 540),
+                    'F': (540, float('inf'))
+                }
+            }
+            
+            if metric_name not in grading_criteria:
+                return 'N/A', grading_criteria.get(metric_name, {}).get('ranges', 'N/A')
+            
+            criteria = grading_criteria[metric_name]
+            ranges_explanation = criteria['ranges']
+            
+            # Special handling for Beta (multiple ranges per grade)
+            if metric_name == 'Beta':
+                for grade in ['A', 'B', 'C', 'D', 'F']:
+                    for low, high in criteria[grade]:
+                        if low <= value < high:
+                            return grade, ranges_explanation
+                return 'F', ranges_explanation
+            
+            # Standard handling for other metrics
+            for grade in ['A', 'B', 'C', 'D', 'F']:
+                low, high = criteria[grade]
+                if low <= value < high:
+                    return grade, ranges_explanation
+            
+            return 'F', ranges_explanation
+        
+        def calculate_overall_grade(grades):
+            """
+            Calculate overall grade with weighting (hedge fund emphasis)
+            
+            Weighting:
+            - Sharpe Ratio: 25% (most important - risk-adjusted return)
+            - Alpha: 20% (value added vs benchmark)
+            - Max Drawdown: 15% (downside protection)
+            - Annual Return: 15% (absolute performance)
+            - Sortino Ratio: 10% (downside risk)
+            - Calmar Ratio: 5%
+            - Volatility: 5%
+            - Win Rate: 3%
+            - Beta: 2%
+            - Others: 5% combined
+            """
+            grade_points = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0, 'N/A': 2.0}
+            
+            weights = {
+                'Sharpe Ratio': 0.25,
+                'Alpha': 0.20,
+                'Max Drawdown': 0.15,
+                'Annual Return': 0.15,
+                'Sortino Ratio': 0.10,
+                'Calmar Ratio': 0.05,
+                'Volatility': 0.05,
+                'Win Rate': 0.03,
+                'Beta': 0.02
+            }
+            
+            weighted_sum = 0
+            total_weight = 0
+            
+            for metric, grade in grades.items():
+                weight = weights.get(metric, 0.005)  # Small weight for others
+                weighted_sum += grade_points.get(grade, 2.0) * weight
+                total_weight += weight
+            
+            gpa = weighted_sum / total_weight if total_weight > 0 else 2.0
+            
+            # Convert GPA to letter grade
+            if gpa >= 3.5:
+                return 'A', gpa
+            elif gpa >= 2.5:
+                return 'B', gpa
+            elif gpa >= 1.5:
+                return 'C', gpa
+            elif gpa >= 0.5:
+                return 'D', gpa
+            else:
+                return 'F', gpa
+        
+        # Calculate all metrics
+        try:
+            # Get benchmark for Alpha/Beta if available
+            benchmark_returns = None
+            try:
+                spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
+                if spy_data is not None:
+                    benchmark_returns = spy_data.pct_change().dropna().iloc[:, 0]
+            except:
+                pass
+            
+            all_metrics = calculate_all_metrics(portfolio_returns, benchmark_returns)
+            
+            # Build grading table
+            grading_data = []
+            grades_dict = {}
+            
+            for metric_name, value in all_metrics.items():
+                grade, ranges = grade_metric(metric_name, value)
+                grades_dict[metric_name] = grade
                 
-                # Determine if portfolio is better
-                if comparison_type == 'higher_better':
-                    is_better = port_value > bench_value
-                    arrow = " 🟢↑" if is_better else " 🔴↓"
-                else:  # lower_better
-                    is_better = port_value < bench_value
-                    arrow = " 🟢↑" if is_better else " 🔴↓"
-                
-                if format_type == '%':
-                    row[bench_name] = f"{bench_value:.2%}{arrow}"
+                # Format value based on metric type
+                if metric_name in ['Annual Return', 'Volatility', 'Best Month', 'Worst Month', 'Alpha']:
+                    formatted_value = f"{value:.2%}"
+                elif metric_name in ['Sharpe Ratio', 'Sortino Ratio', 'Calmar Ratio', 'Beta']:
+                    formatted_value = f"{value:.2f}"
+                elif metric_name == 'Max Drawdown':
+                    formatted_value = f"{value:.2%}"
+                elif metric_name == 'Win Rate':
+                    formatted_value = f"{value:.1%}"
+                elif metric_name == 'Avg Recovery Days':
+                    formatted_value = f"{value:.0f} days"
                 else:
-                    row[bench_name] = f"{bench_value:.2f}{arrow}"
+                    formatted_value = f"{value:.2f}"
+                
+                # Color code the grade
+                grade_color = {
+                    'A': '🟢',
+                    'B': '🟡', 
+                    'C': '🟠',
+                    'D': '🔴',
+                    'F': '⛔'
+                }
+                
+                grading_data.append({
+                    'Metric': metric_name,
+                    'Grading Scale': ranges,
+                    'Your Value': formatted_value,
+                    'Grade': f"{grade_color.get(grade, '')} {grade}"
+                })
             
-            comparison_rows.append(row)
+            # Calculate overall grade
+            overall_letter, gpa = calculate_overall_grade(grades_dict)
+            
+            # Display the table
+            grading_df = pd.DataFrame(grading_data)
+            
+            # Style the dataframe
+            st.dataframe(
+                grading_df,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Overall Grade Display
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col2:
+                grade_color_map = {
+                    'A': 'success',
+                    'B': 'info',
+                    'C': 'warning',
+                    'D': 'error',
+                    'F': 'error'
+                }
+                
+                grade_emoji = {
+                    'A': '🏆',
+                    'B': '✅',
+                    'C': '⚠️',
+                    'D': '❌',
+                    'F': '⛔'
+                }
+                
+                grade_message = {
+                    'A': 'Outstanding! You are beating the S&P 500 - doing better than 80%+ of professionals!',
+                    'B': 'Excellent! S&P 500 level performance (already beats 80% of professionals long-term).',
+                    'C': 'Below Market. Consider if active management is worth the effort vs. just buying SPY.',
+                    'D': 'Significantly Below Market. Strategy needs major improvement.',
+                    'F': 'Poor Performance. Switch to index funds (SPY/VOO) - simpler and better.'
+                }
+                
+                st.markdown(f"""
+                    <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    border-radius: 15px; color: white;">
+                        <h1 style="margin: 0; font-size: 4rem;">{grade_emoji[overall_letter]}</h1>
+                        <h2 style="margin: 0.5rem 0;">Overall Grade: {overall_letter}</h2>
+                        <p style="margin: 0; font-size: 1.2rem;">GPA: {gpa:.2f} / 4.0</p>
+                        <p style="margin-top: 1rem; font-size: 1.1rem;">{grade_message[overall_letter]}</p>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            # Grade interpretation
+            st.markdown("---")
+            st.markdown("#### 📖 Understanding Your Grades")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                    **Grade Scale (Calibrated to S&P 500 = B):**
+                    - 🟢 **A (4.0):** Beating S&P 500 - You're outperforming 80%+ of professionals!
+                    - 🟡 **B (3.0):** S&P 500 level - Excellent (beats 80% of pros long-term)
+                    - 🟠 **C (2.0):** Below market - Consider switching to SPY
+                    - 🔴 **D (1.0):** Significantly below market - Needs major changes
+                    - ⛔ **F (0.0):** Poor - Just buy SPY/VOO instead
+                    
+                    **Remember:** Getting a B means you're doing as well as the best long-term 
+                    investment! Most active managers fail to achieve this.
+                """)
+            
+            with col2:
+                st.markdown("""
+                    **Overall Grade Weighting (Hedge Fund Standard):**
+                    - Sharpe Ratio: 25% (Risk-adjusted returns)
+                    - Alpha: 20% (Value added vs. market)
+                    - Max Drawdown: 15% (Downside protection)
+                    - Annual Return: 15% (Absolute performance)
+                    - Other metrics: 25% (Sortino, Calmar, etc.)
+                """)
+            
+            # Action items based on grade
+            st.markdown("---")
+            st.markdown("#### 🎯 What Your Grade Means for Action")
+            
+            if overall_letter == 'A':
+                st.success("""
+                    **Grade A - Outstanding Performance!**
+                    
+                    ✅ **What to do:**
+                    - Document this performance (you're beating professionals!)
+                    - Maintain current strategy with quarterly rebalancing
+                    - Consider if you can handle slight increase in risk for potentially higher returns
+                    - Share this report card with your financial advisor
+                    
+                    ⚠️ **Caution:**
+                    - Don't get overconfident - markets change
+                    - Ensure you can still handle the max drawdown emotionally
+                    - Monitor for strategy degradation (check rolling Sharpe)
+                """)
+            elif overall_letter == 'B':
+                st.info("""
+                    **Grade B - Very Good Performance!**
+                    
+                    ✅ **What to do:**
+                    - You're beating most professionals - well done!
+                    - Look for specific C or D grades to improve
+                    - Continue current strategy with confidence
+                    - Monitor monthly to ensure performance persists
+                    
+                    💡 **Improvement Areas:**
+                    - Check which metrics are C or below
+                    - Consider minor optimization (Tab 7)
+                    - Compare to benchmarks (Tab 6) for validation
+                """)
+            elif overall_letter == 'C':
+                st.warning("""
+                    **Grade C - Acceptable but Room for Improvement**
+                    
+                    ⚠️ **What to do:**
+                    - Review metrics graded D or F - these need attention
+                    - Compare to simple strategies (60/40, SPY)
+                    - Consider if complexity is worth the effort
+                    - Use Tab 7 (Optimization) to explore improvements
+                    
+                    🔍 **Key Questions:**
+                    - Are you beating SPY? If not, why not just buy SPY?
+                    - Is your Sharpe Ratio > 0.5? If not, too much risk for return
+                    - Can you emotionally handle the max drawdown?
+                """)
+            else:  # D or F
+                st.error("""
+                    **Grade D/F - Performance Needs Major Improvement**
+                    
+                    🚨 **Immediate Actions:**
+                    1. **Stop and reassess** - Don't throw good money after bad
+                    2. **Check Tab 6** - Are you underperforming simple strategies?
+                    3. **Review Tab 4** - Are you in wrong regime for your strategy?
+                    4. **Consider alternatives:**
+                    - Switch to 60/40 portfolio (simple, proven)
+                    - Buy SPY index fund (beats 80% of pros long-term)
+                    - Hire a professional advisor
+                    
+                    ⚠️ **Reality Check:**
+                    - If multiple metrics are F, strategy is fundamentally flawed
+                    - Don't let losses compound - cut losses and restart
+                    - Sometimes simplest solution (index funds) is best
+                """)
+            
+        except Exception as e:
+            st.error(f"Error calculating portfolio grades: {str(e)}")
+            st.info("Ensure your portfolio has sufficient data for grading (6+ months recommended)")
         
-        comparison_df = pd.DataFrame(comparison_rows)
-        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        # Generate PyFolio Analysis
+        st.markdown("---")
+        st.markdown("### 📈 Your Professional Tear Sheet")
         
+        try:
+            # Ensure returns is a Series with datetime index
+            returns_series = portfolio_returns.copy()
+            if isinstance(returns_series, pd.DataFrame):
+                returns_series = returns_series.iloc[:, 0]
+            
+            with st.spinner("Generating institutional-grade analytics..."):
+                fig = pf.create_returns_tear_sheet(returns_series, return_fig=True)
+                if fig is not None:
+                    st.pyplot(fig)
+                else:
+                    st.warning("Could not generate returns tear sheet")
+            
+            st.markdown("#### 💡 How to Interpret Your Results")
+            st.markdown("**Quick Assessment (30 seconds):**")
+            st.markdown("""
+            1. Look at Annual Returns table → Are most years positive? ✅ or ❌
+            2. Check Rolling Sharpe → Is it mostly above 0.5? ✅ or ❌
+            3. Review Top 5 Drawdowns → Do you recover within 12 months? ✅ or ❌
+            """)
+            
+            st.success("**If all three are ✅:** You have an institutionally-valid strategy!")
+            st.warning("**If any are ❌:** Review the specific section above to understand what needs improvement.")
+            
+            st.markdown("**Next Steps:**")
+            st.markdown("""
+            - **If metrics are strong:** Document this analysis! You now have proof 
+            your strategy works at a professional level.
+            - **If metrics are weak:** Use Tab 7 (Optimization) to explore improvements, 
+            or consider a simpler approach (60/40 or SPY).
+            - **If metrics are mixed:** Identify the specific weakness (e.g., slow recovery, 
+            high volatility) and adjust your allocation accordingly.
+            """)
+            
+            # Professional comparison
+            st.markdown("---")
+            st.markdown("### 🏆 How Do You Compare to Professionals?")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("""
+                    <div class="metric-card">
+                        <h4>Hedge Fund Benchmark</h4>
+                        <p><strong>Typical Performance:</strong></p>
+                        <ul>
+                            <li>Annual Return: 8-12%</li>
+                            <li>Sharpe Ratio: 0.8-1.5</li>
+                            <li>Max Drawdown: -15% to -25%</li>
+                            <li>Win Rate: 60-70%</li>
+                        </ul>
+                        <p style="font-size: 0.9rem; margin-top: 1rem;">
+                        <em>If you beat these, you're performing at hedge fund level!</em></p>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown("""
+                    <div class="metric-card">
+                        <h4>Warren Buffett Benchmark</h4>
+                        <p><strong>Berkshire Hathaway:</strong></p>
+                        <ul>
+                            <li>Annual Return: ~20% (historical)</li>
+                            <li>Sharpe Ratio: ~0.8</li>
+                            <li>Max Drawdown: -50% (2008)</li>
+                            <li>Win Rate: ~70%</li>
+                        </ul>
+                        <p style="font-size: 0.9rem; margin-top: 1rem;">
+                        <em>Even Buffett has had severe drawdowns. You're in good company.</em></p>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown("""
+                    <div class="metric-card">
+                        <h4>S&P 500 Benchmark</h4>
+                        <p><strong>Index Performance:</strong></p>
+                        <ul>
+                            <li>Annual Return: ~10%</li>
+                            <li>Sharpe Ratio: ~0.5-0.7</li>
+                            <li>Max Drawdown: -56% (2008)</li>
+                            <li>Win Rate: ~55%</li>
+                        </ul>
+                        <p style="font-size: 0.9rem; margin-top: 1rem;">
+                        <em>If you can't beat this, just buy SPY. That's okay!</em></p>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("""
+                <div class="success-box">
+                    <h4>🎯 Reality Check</h4>
+                    <p><strong>Professional investors fail to beat SPY 80-90% of the time over 10+ years.</strong></p>
+                    <p>If your PyFolio tear sheet shows you beating SPY on a risk-adjusted basis (Sharpe ratio), 
+                    you're doing better than most professionals. Be proud of that!</p>
+                    <p><strong>Key Insight:</strong> It's not about having the highest returns. It's about having 
+                    good risk-adjusted returns that you can stick with through market cycles. PyFolio shows you 
+                    if your strategy is sustainable long-term.</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        except Exception as e:
+            st.error(f"Error generating PyFolio analysis: {str(e)}")
+            st.info("Note: PyFolio requires sufficient historical data (typically 6+ months)")
+            
+            st.markdown("""
+                <div class="warning-box">
+                    <h4>⚠️ Troubleshooting</h4>
+                    <p>If PyFolio fails to generate:</p>
+                    <ul>
+                        <li>Ensure you have at least 6 months of data</li>
+                        <li>Check that your portfolio has daily returns</li>
+                        <li>Verify date range includes sufficient trading days</li>
+                    </ul>
+                </div>
+            """, unsafe_allow_html=True)
+
+
+    # =============================================================================
+    # TAB 4: MARKET REGIMES (NEW!)
+    # =============================================================================
+
+    with tab4:
+        st.markdown("## 🌡️ Market Conditions & Regime Analysis")
         st.markdown("""
-            <div style="text-align: center; padding: 10px; background: #f8f9fa; border-radius: 5px; margin-top: 10px;">
-                <small><strong>Legend:</strong> 🟢↑ = Your portfolio better | 🔴↓ = Benchmark better</small>
+            <div class="info-box">
+                <h4>What Are Market Regimes?</h4>
+                <p>Markets behave differently in different conditions. Understanding which "regime" 
+                you're in helps you know if your strategy is working as expected.</p>
+                <p><strong>The 5 Regimes:</strong></p>
+                <ol>
+                    <li><strong>🟢 Bull Market (Low Vol):</strong> Goldilocks - steady gains, low stress</li>
+                    <li><strong>🔵 Bull Market (High Vol):</strong> Winning but volatile - gains with anxiety</li>
+                    <li><strong>🟡 Sideways/Choppy:</strong> Going nowhere - range-bound, frustrating</li>
+                    <li><strong>🟠 Bear Market (Low Vol):</strong> Slow bleed - gradual decline</li>
+                    <li><strong>🔴 Bear Market (High Vol):</strong> Crisis mode - crashes and panic</li>
+                </ol>
             </div>
         """, unsafe_allow_html=True)
         
-        # Calculate percentile ranking
+        # Detect regimes
+        with st.spinner("Analyzing market regimes..."):
+            regimes = detect_market_regimes(portfolio_returns, lookback=60)
+            regime_stats = analyze_regime_performance(portfolio_returns, regimes)
+        
+        # Current Regime
         st.markdown("---")
-        st.markdown("### 🏆 Percentile Ranking")
+        st.markdown("### 🎯 Current Market Regime")
+        current_regime = regimes.iloc[-1]
         
-        # Collect all Sharpe ratios for ranking
-        all_sharpes = [metrics['Sharpe Ratio']]
-        for bench_metrics in benchmarks_metrics.values():
-            all_sharpes.append(bench_metrics['Sharpe Ratio'])
+        regime_colors = {
+            'Bull Market (Low Vol)': '#28a745',
+            'Bull Market (High Vol)': '#17a2b8',
+            'Sideways/Choppy': '#ffc107',
+            'Bear Market (Low Vol)': '#fd7e14',
+            'Bear Market (High Vol)': '#dc3545'
+        }
         
-        # Calculate percentile
-        portfolio_sharpe = metrics['Sharpe Ratio']
-        better_than_count = sum(1 for s in all_sharpes if portfolio_sharpe > s)
-        percentile = (better_than_count / len(all_sharpes)) * 100
+        regime_descriptions = {
+            'Bull Market (Low Vol)': {
+                'emoji': '🟢',
+                'status': 'Excellent',
+                'description': 'Best conditions for investing. Steady gains with low stress. Stay invested!',
+                'action': 'Maintain current allocation. Consider adding to positions on minor dips.'
+            },
+            'Bull Market (High Vol)': {
+                'emoji': '🔵',
+                'status': 'Good but Volatile',
+                'description': 'Making gains but with bumpy ride. Normal during strong growth phases.',
+                'action': 'Stay the course. Volatility is creating buying opportunities. Don\'t sell on dips.'
+            },
+            'Sideways/Choppy': {
+                'emoji': '🟡',
+                'status': 'Neutral',
+                'description': 'Market is range-bound. Frustrating but not dangerous.',
+                'action': 'Be patient. Avoid chasing momentum. Good time for rebalancing.'
+            },
+            'Bear Market (Low Vol)': {
+                'emoji': '🟠',
+                'status': 'Caution',
+                'description': 'Slow grind lower. Early warning sign of potential trouble.',
+                'action': 'Review portfolio. Consider raising cash or adding defensive positions.'
+            },
+            'Bear Market (High Vol)': {
+                'emoji': '🔴',
+                'status': 'Crisis Mode',
+                'description': 'High stress period with significant losses. Historically temporary.',
+                'action': 'DO NOT PANIC SELL! Historically the best buying opportunity. Deep breaths.'
+            }
+        }
         
-        col1, col2, col3 = st.columns(3)
+        regime_info = regime_descriptions[current_regime]
         
-        with col1:
-            st.metric(
-                "Your Percentile",
-                f"{percentile:.0f}th",
-                help="Based on Sharpe Ratio vs selected benchmarks"
-            )
+        st.markdown(f"""
+            <div class="metric-card" style="border-left: 5px solid {regime_colors[current_regime]};">
+                <h2>{regime_info['emoji']} {current_regime}</h2>
+                <h3>Status: {regime_info['status']}</h3>
+                <p style="font-size: 1.1rem; margin-top: 1rem;"><strong>What This Means:</strong> 
+                {regime_info['description']}</p>
+                <p style="font-size: 1.1rem; margin-top: 1rem;"><strong>🎯 Action Item:</strong> 
+                {regime_info['action']}</p>
+            </div>
+        """, unsafe_allow_html=True)
         
-        with col2:
-            better_count = sum(1 for _, bench_metrics in benchmarks_metrics.items() 
-                             if metrics['Sharpe Ratio'] > bench_metrics['Sharpe Ratio'])
-            st.metric(
-                "Benchmarks Beaten",
-                f"{better_count} of {len(benchmarks_metrics)}",
-                help="Number of benchmarks you outperformed on Sharpe Ratio"
-            )
-        
-        with col3:
-            rank_text = ""
-            if percentile >= 80:
-                rank_text = "🌟 Excellent - Top 20%"
-                rank_color = "success"
-            elif percentile >= 60:
-                rank_text = "✅ Good - Above Average"
-                rank_color = "info"
-            elif percentile >= 40:
-                rank_text = "⚪ Average"
-                rank_color = "warning"
-            else:
-                rank_text = "⚠️ Below Average"
-                rank_color = "error"
-            
-            st.metric("Rating", rank_text)
-        
-        # Interpretation based on ranking
-        if percentile >= 70:
-            st.success(f"""
-                **🎉 Strong Performance!** Your portfolio is outperforming {percentile:.0f}% of selected benchmarks.
-                You're delivering better risk-adjusted returns than most standard strategies.
-            """)
-        elif percentile >= 50:
-            st.info(f"""
-                **✅ Solid Performance:** Your portfolio is in the {percentile:.0f}th percentile.
-                You're performing above average but there may be room for improvement.
-            """)
-        else:
-            st.warning(f"""
-                **⚠️ Performance Review Needed:** Your portfolio is in the {percentile:.0f}th percentile.
-                Consider reviewing your strategy - several benchmarks are delivering better risk-adjusted returns.
-            """)
-        
-        # Cumulative Performance Chart
+        # Regime Timeline
         st.markdown("---")
-        st.markdown("### 📈 Cumulative Performance Over Time")
-        
-        fig, ax = plt.subplots(figsize=(14, 8))
-        
-        # Plot portfolio
-        cum_returns_portfolio = (1 + portfolio_returns).cumprod()
-        cum_returns_portfolio.plot(ax=ax, linewidth=3, label='Your Portfolio', color='#667eea')
-        
-        # Plot benchmarks
-        colors = ['#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6f42c1', '#fd7e14']
-        for i, (name, returns) in enumerate(benchmarks_data.items()):
-            cum_returns_bench = (1 + returns).cumprod()
-            cum_returns_bench.plot(ax=ax, linewidth=2, label=name, 
-                                  color=colors[i % len(colors)], linestyle='--', alpha=0.8)
-        
-        ax.set_title('Performance Comparison vs Smart Benchmarks', fontsize=16, fontweight='bold', pad=20)
-        ax.set_xlabel('Date', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Cumulative Return', fontsize=12, fontweight='bold')
-        ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('white')
-        
-        plt.tight_layout()
+        st.markdown("### 📊 Regime Timeline & Performance")
+        fig = plot_regime_chart(regimes, portfolio_returns)
         st.pyplot(fig)
         
-        # Smart interpretation
+        # Regime timeline interpretation
         st.markdown("""
             <div class="interpretation-box">
-                <div class="interpretation-title">💡 How to Interpret Your Results</div>
-                <p><strong>Understanding Benchmark Selection:</strong></p>
+                <div class="interpretation-title">💡 How to Read the Regime Chart</div>
+                <p><strong>Top Chart:</strong> Your portfolio value with colored backgrounds showing regimes</p>
+                <p><strong>Bottom Chart:</strong> Timeline of regime changes</p>
+                <p><strong>Key Insights to Look For:</strong></p>
                 <ul>
-                    <li>Benchmarks were auto-selected based on your portfolio composition</li>
-                    <li>This ensures you're comparing against relevant indices, not generic ones</li>
-                    <li>A tech-heavy portfolio should compare to QQQ, not just SPY</li>
+                    <li><strong>Big gains in green zones:</strong> Portfolio is working as designed</li>
+                    <li><strong>Losses in red zones:</strong> Expected, but how bad compared to benchmark?</li>
+                    <li><strong>Flat in yellow zones:</strong> Your capital is idle - frustrating but safe</li>
+                    <li><strong>Quick regime switches:</strong> Market is uncertain, be careful</li>
+                    <li><strong>Long red zones:</strong> True bear markets - historical best buying opportunity</li>
                 </ul>
-                <p><strong>What Good Performance Looks Like:</strong></p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Performance by Regime
+        st.markdown("---")
+        st.markdown("### 📈 Performance by Regime")
+        
+        # Format the dataframe for display
+        regime_stats_display = regime_stats.copy()
+        regime_stats_display['Avg Daily Return'] = regime_stats_display['Avg Daily Return'].apply(lambda x: f"{x:.4f}")
+        regime_stats_display['Volatility'] = regime_stats_display['Volatility'].apply(lambda x: f"{x:.2%}")
+        regime_stats_display['Best Day'] = regime_stats_display['Best Day'].apply(lambda x: f"{x:.2%}")
+        regime_stats_display['Worst Day'] = regime_stats_display['Worst Day'].apply(lambda x: f"{x:.2%}")
+        regime_stats_display['Win Rate'] = regime_stats_display['Win Rate'].apply(lambda x: f"{x:.2%}")
+        
+        # Color-code the table
+        def color_regime(val):
+            color = regime_colors.get(val, '#f8f9fa')
+            return f'background-color: {color}; color: white; font-weight: bold'
+        
+        styled_df = regime_stats_display.style.applymap(
+            color_regime, subset=['Regime']
+        )
+        
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Regime performance interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 How to Use Regime Performance Data</div>
+                <p><strong>What Each Column Means:</strong></p>
                 <ul>
-                    <li><strong>Above most benchmarks:</strong> Your strategy is adding value ✓</li>
-                    <li><strong>Better Sharpe than SPY:</strong> You're delivering superior risk-adjusted returns ✓</li>
-                    <li><strong>70th percentile or higher:</strong> You're outperforming most strategies ✓</li>
+                    <li><strong>Occurrences:</strong> How many days in each regime</li>
+                    <li><strong>Avg Daily Return:</strong> Typical daily move in that regime</li>
+                    <li><strong>Volatility:</strong> Annualized volatility (stress level)</li>
+                    <li><strong>Best/Worst Day:</strong> Extreme moves to expect</li>
+                    <li><strong>Win Rate:</strong> % of positive days</li>
                 </ul>
-                <p><strong>🚩 Warning Signs:</strong></p>
+                <p><strong>Key Questions to Ask:</strong></p>
                 <ul>
-                    <li><strong>Below 50th percentile:</strong> Majority of benchmarks are beating you</li>
-                    <li><strong>Lower Sharpe than all benchmarks:</strong> Taking more risk for less return</li>
-                    <li><strong>Underperforming SPY consistently:</strong> Consider switching to index fund</li>
+                    <li>Do you make money in bull markets? (You should!)</li>
+                    <li>How bad are losses in bear markets vs benchmark?</li>
+                    <li>Is volatility acceptable in each regime?</li>
+                    <li>Win rate > 50% in bull markets? Good sign.</li>
+                    <li>Win rate < 40% in bear markets? Portfolio may need defensive assets.</li>
+                </ul>
+                <p><strong>🚩 Red Flags:</strong></p>
+                <ul>
+                    <li>Negative returns in Bull Market (Low Vol) - strategy is broken</li>
+                    <li>Higher losses in Bear Market (High Vol) than benchmark - insufficient protection</li>
+                    <li>Low win rate across all regimes - strategy is too volatile for you</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+
+
+    # =============================================================================
+    # TAB 5: FORWARD-LOOKING RISK ANALYSIS (NEW!)
+    # =============================================================================
+
+    with tab5:
+        st.markdown("## 🔮 Forward-Looking Risk Analysis")
+        st.markdown("""
+            <div class="warning-box">
+                <h4>⚠️ Important Disclaimer</h4>
+                <p><strong>Past performance does not guarantee future results.</strong> 
+                This analysis projects future risks based on historical behavior, but markets can change.</p>
+                <p>Use these projections as one tool among many for decision-making, not as a crystal ball.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Calculate forward-looking metrics
+        with st.spinner("Running forward-looking analysis..."):
+            forward_metrics = calculate_forward_risk_metrics(portfolio_returns)
+        
+        # Expected Metrics
+        st.markdown("---")
+        st.markdown("### 📊 Expected Performance (Next 12 Months)")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            expected_return = forward_metrics['Expected Annual Return']
+            color_class = 'metric-excellent' if expected_return > 0.10 else 'metric-good' if expected_return > 0.05 else 'metric-fair'
+            st.markdown(f"""
+                <div class="{color_class}">
+                    <h4>Expected Return</h4>
+                    <h2>{expected_return:.2%}</h2>
+                    <p style="margin-top: 0.5rem;">Based on historical avg</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            expected_vol = forward_metrics['Expected Volatility']
+            color_class = 'metric-excellent' if expected_vol < 0.15 else 'metric-good' if expected_vol < 0.20 else 'metric-fair'
+            st.markdown(f"""
+                <div class="{color_class}">
+                    <h4>Expected Volatility</h4>
+                    <h2>{expected_vol:.2%}</h2>
+                    <p style="margin-top: 0.5rem;">Expected fluctuation</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            prob_loss = forward_metrics['Probability of Daily Loss']
+            color_class = 'metric-excellent' if prob_loss < 0.40 else 'metric-good' if prob_loss < 0.45 else 'metric-fair'
+            st.markdown(f"""
+                <div class="{color_class}">
+                    <h4>Daily Loss Probability</h4>
+                    <h2>{prob_loss:.1%}</h2>
+                    <p style="margin-top: 0.5rem;">Chance of down day</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            est_max_dd = forward_metrics['Estimated Max Drawdown']
+            color_class = 'metric-excellent' if est_max_dd > -0.15 else 'metric-good' if est_max_dd > -0.25 else 'metric-poor'
+            st.markdown(f"""
+                <div class="{color_class}">
+                    <h4>Est. Max Drawdown</h4>
+                    <h2>{est_max_dd:.2%}</h2>
+                    <p style="margin-top: 0.5rem;">Worst case scenario</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Risk Metrics
+        st.markdown("---")
+        st.markdown("### 🎯 Value at Risk (VaR) Analysis")
+        st.markdown("""
+            <div class="info-box">
+                <p><strong>Value at Risk (VaR)</strong> answers: "How much could I lose on a bad day?"</p>
+                <p><strong>Conditional VaR (CVaR)</strong> answers: "If that bad day happens, how much worse could it get?"</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 95% Confidence Level")
+            var_95 = forward_metrics['VaR (95%)']
+            cvar_95 = forward_metrics['CVaR (95%)']
+            
+            st.markdown(f"""
+                <div class="metric-card">
+                    <h4>VaR (95%)</h4>
+                    <h2>{var_95:.2%}</h2>
+                    <p style="margin-top: 1rem;">
+                    <strong>What this means:</strong> On 95% of days, your loss won't be worse than this.
+                    Or said differently: Only 1 in 20 days (5%) will be worse than this.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+                <div class="metric-card" style="margin-top: 1rem;">
+                    <h4>CVaR (95%)</h4>
+                    <h2>{cvar_95:.2%}</h2>
+                    <p style="margin-top: 1rem;">
+                    <strong>What this means:</strong> On those 5% worst days, this is the AVERAGE loss.
+                    This is your "expected bad day" loss.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("#### 99% Confidence Level")
+            var_99 = forward_metrics['VaR (99%)']
+            cvar_99 = forward_metrics['CVaR (99%)']
+            
+            st.markdown(f"""
+                <div class="metric-card">
+                    <h4>VaR (99%)</h4>
+                    <h2>{var_99:.2%}</h2>
+                    <p style="margin-top: 1rem;">
+                    <strong>What this means:</strong> On 99% of days, your loss won't be worse than this.
+                    Only 1 in 100 days (1%) will be worse.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+                <div class="metric-card" style="margin-top: 1rem;">
+                    <h4>CVaR (99%)</h4>
+                    <h2>{cvar_99:.2%}</h2>
+                    <p style="margin-top: 1rem;">
+                    <strong>What this means:</strong> On those 1% worst days, this is the AVERAGE loss.
+                    This is your "tail risk" exposure.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # VaR interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 How to Use VaR in Real Life</div>
+                <p><strong>Example with $100,000 Portfolio:</strong></p>
+                <ul>
+                    <li>VaR (95%) = -2.5% → On 95% of days, you'll lose less than $2,500</li>
+                    <li>CVaR (95%) = -3.5% → On the 5% worst days, average loss is $3,500</li>
+                    <li>VaR (99%) = -4.0% → Only 1% of days lose more than $4,000</li>
+                    <li>CVaR (99%) = -5.5% → On the very worst 1% of days, average loss is $5,500</li>
+                </ul>
+                <p><strong>Questions to Ask Yourself:</strong></p>
+                <ul>
+                    <li>Can I emotionally handle the CVaR (95%) loss regularly?</li>
+                    <li>Can I financially survive the CVaR (99%) loss?</li>
+                    <li>Do I have enough liquidity to avoid selling at a loss?</li>
+                </ul>
+                <p><strong>🚩 Red Flags:</strong></p>
+                <ul>
+                    <li>CVaR (95%) > -5%: You'll experience painful days frequently</li>
+                    <li>CVaR (99%) > -10%: Your worst days are VERY bad</li>
+                    <li>If these numbers scare you, your portfolio is too aggressive</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Monte Carlo Simulation
+        st.markdown("---")
+        st.markdown("### 🎲 Monte Carlo Simulation (1 Year Forward)")
+        st.markdown("""
+            <div class="info-box">
+                <p><strong>What is Monte Carlo?</strong> We run 1,000+ possible future scenarios based on your 
+                portfolio's historical behavior. This shows the range of possible outcomes.</p>
+                <p><strong>How to read:</strong> The fan of lines shows possible paths. The colored lines show 
+                key percentiles (5th to 95th). The wider the fan, the more uncertain the future.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        with st.spinner("Running Monte Carlo simulation (this may take a moment)..."):
+            simulations = monte_carlo_simulation(portfolio_returns, days_forward=252, num_simulations=1000)
+        
+        fig = plot_monte_carlo_simulation(simulations)
+        st.pyplot(fig)
+        
+        # Monte Carlo interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Understanding Monte Carlo Results</div>
+                <p><strong>The Lines Explained:</strong></p>
+                <ul>
+                    <li><strong>Green (50th %ile):</strong> Median outcome - "most likely" path</li>
+                    <li><strong>Dark Blue (25th & 75th %ile):</strong> "Typical" range of outcomes</li>
+                    <li><strong>Orange (5th %ile):</strong> Bad luck scenario - 95% chance of doing better</li>
+                    <li><strong>Gray (95th %ile):</strong> Good luck scenario - 95% chance of doing worse</li>
+                </ul>
+                <p><strong>What to Look For:</strong></p>
+                <ul>
+                    <li><strong>Wide fan:</strong> High uncertainty, hard to predict</li>
+                    <li><strong>Narrow fan:</strong> More predictable outcomes</li>
+                    <li><strong>Most lines above 1.0:</strong> Positive expected returns</li>
+                    <li><strong>5th %ile below 0.85:</strong> Significant risk of 15%+ loss</li>
+                </ul>
+                <p><strong>Real-World Use:</strong></p>
+                <ul>
+                    <li>Planning to retire next year? Look at 5th percentile - can you afford that outcome?</li>
+                    <li>Young investor? Focus on median and 75th percentile - you have time</li>
+                    <li>Need the money in 1 year? If 25th percentile is below 0.95, you have risk</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Scenario Analysis
+        st.markdown("---")
+        st.markdown("### 📊 Scenario Analysis (1 Year Forward)")
+        
+        final_values = simulations[-1, :]
+        scenarios = {
+            'Best Case (95th %ile)': np.percentile(final_values, 95),
+            'Good Case (75th %ile)': np.percentile(final_values, 75),
+            'Median Case (50th %ile)': np.percentile(final_values, 50),
+            'Bad Case (25th %ile)': np.percentile(final_values, 25),
+            'Worst Case (5th %ile)': np.percentile(final_values, 5)
+        }
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            scenario_df = pd.DataFrame({
+                'Scenario': scenarios.keys(),
+                'Portfolio Value': [f"${v:.2f}" for v in scenarios.values()],
+                'Return': [f"{(v-1)*100:.1f}%" for v in scenarios.values()]
+            })
+            st.dataframe(scenario_df, use_container_width=True, hide_index=True)
+        
+        with col2:
+            st.markdown("""
+                <div class="metric-card">
+                    <h4>Probability Analysis</h4>
+                    <p style="margin-top: 1rem;">
+                        <strong>Make Money:</strong><br>
+                        {:.1f}% chance<br><br>
+                        <strong>Lose Money:</strong><br>
+                        {:.1f}% chance<br><br>
+                        <strong>Lose > 10%:</strong><br>
+                        {:.1f}% chance
+                    </p>
+                </div>
+            """.format(
+                (final_values > 1.0).sum() / len(final_values) * 100,
+                (final_values < 1.0).sum() / len(final_values) * 100,
+                (final_values < 0.9).sum() / len(final_values) * 100
+            ), unsafe_allow_html=True)
+        
+        # Scenario interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Using Scenarios for Decision-Making</div>
+                <p><strong>Example: Planning with $100,000</strong></p>
+                <ul>
+                    <li><strong>Best Case:</strong> Portfolio grows to $115,000 (15% gain) - Happy days!</li>
+                    <li><strong>Median Case:</strong> Portfolio grows to $107,000 (7% gain) - Acceptable</li>
+                    <li><strong>Worst Case:</strong> Portfolio drops to $92,000 (8% loss) - Ouch, but survivable?</li>
                 </ul>
                 <p><strong>Decision Framework:</strong></p>
                 <ul>
-                    <li>If beating most benchmarks: Keep your strategy, it's working!</li>
-                    <li>If average performance: Minor tweaks may help, but acceptable</li>
-                    <li>If below average: Strongly consider switching to best-performing benchmark</li>
+                    <li><strong>Can't afford worst case?</strong> Portfolio is too aggressive. Add bonds/cash.</li>
+                    <li><strong>Comfortable with worst case?</strong> You're properly positioned.</li>
+                    <li><strong>Disappointed by median case?</strong> Need more risk for your goals.</li>
                 </ul>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Rolling Sharpe Comparison
-        st.markdown("---")
-        st.markdown("### 📈 Rolling Sharpe Ratio (Risk-Adjusted Performance Over Time)")
-        
-        window = 60
-        portfolio_rolling_sharpe = (portfolio_returns.rolling(window).mean() * 252) / (portfolio_returns.rolling(window).std() * np.sqrt(252))
-        
-        fig, ax = plt.subplots(figsize=(14, 8))
-        portfolio_rolling_sharpe.plot(ax=ax, linewidth=3, label='Your Portfolio', color='#667eea')
-        
-        for i, (name, returns) in enumerate(benchmarks_data.items()):
-            bench_rolling_sharpe = (returns.rolling(window).mean() * 252) / (returns.rolling(window).std() * np.sqrt(252))
-            bench_rolling_sharpe.plot(ax=ax, linewidth=2, label=name,
-                                     color=colors[i % len(colors)], linestyle='--', alpha=0.8)
-        
-        ax.axhline(y=1, color='#28a745', linestyle=':', linewidth=1.5, alpha=0.7, label='Good (1.0)')
-        ax.axhline(y=0, color='#dc3545', linestyle=':', linewidth=1.5, alpha=0.7)
-        
-        ax.set_title(f'Rolling {window}-Day Sharpe Ratio Comparison', fontsize=16, fontweight='bold', pad=20)
-        ax.set_xlabel('Date', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Sharpe Ratio', fontsize=12, fontweight='bold')
-        ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.set_facecolor('#f8f9fa')
-        fig.patch.set_facecolor('white')
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        st.markdown("""
-            <div class="interpretation-box">
-                <div class="interpretation-title">💡 Rolling Sharpe Analysis</div>
-                <p><strong>What This Shows:</strong> How risk-adjusted returns evolved over time</p>
-                <p><strong>Key Patterns:</strong></p>
+                <p><strong>Important Reality Check:</strong></p>
                 <ul>
-                    <li><strong>Consistently above benchmarks:</strong> Your strategy consistently delivers better risk-adjusted returns</li>
-                    <li><strong>Converges during crises:</strong> All strategies suffer together in major crashes</li>
-                    <li><strong>Diverges in recovery:</strong> Shows which strategy recovers better</li>
-                    <li><strong>Recent trend matters most:</strong> Is your edge improving or deteriorating?</li>
+                    <li>These scenarios assume historical patterns continue</li>
+                    <li>Black swan events (2008, COVID) can exceed worst case</li>
+                    <li>Keep 6-12 months expenses in cash regardless of scenarios</li>
                 </ul>
             </div>
         """, unsafe_allow_html=True)
 
 
+    # =============================================================================
+    # TAB 6: COMPARE BENCHMARKS (ENHANCED WITH SMART SELECTION)
+    # =============================================================================
 
-# =============================================================================
-# TAB 7: OPTIMIZATION
-# =============================================================================
-
-with tab7:
-    st.markdown("## 🎯 Portfolio Optimization")
-    st.markdown("""
-        <div class="info-box">
-            <h4>What is Portfolio Optimization?</h4>
-            <p>Find the best allocation of your assets to maximize returns for a given level of risk, 
-            or minimize risk for a given level of returns.</p>
-            <p><strong>Maximum Sharpe Ratio:</strong> Find the allocation with the best risk-adjusted returns.</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # ETF DEEP DIVE (Phase 1 OpenBB Feature)
-    st.markdown("---")
-    st.markdown("### 🔍 ETF Deep Dive - Know What You Own")
-    
-    st.info("""
-        **💰 Optimize Your Costs:** Discover what's inside your ETFs and find cheaper alternatives that track the same index.
-        Small differences in expense ratios compound to thousands of dollars over time!
-    """)
-    
-    # ETF Selector
-    selected_etf = st.selectbox(
-        "Select an ETF to analyze:",
-        list(weights.keys()),
-        help="Choose an ETF from your portfolio to see detailed information"
-    )
-    
-    if selected_etf:
-        # Get expense ratio from yfinance
-        try:
-            etf_ticker = yf.Ticker(selected_etf)
-            etf_info = etf_ticker.info
-            
-            # Basic Information Section
-            st.markdown(f"#### 📋 {selected_etf} - Basic Information")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                expense_ratio = etf_info.get('expenseRatio', 0) if etf_info.get('expenseRatio') else 0
-                st.metric(
-                    "Expense Ratio",
-                    f"{expense_ratio:.2%}",
-                    help="Annual fee as percentage of investment"
-                )
-                portfolio_value = 100000  # Default
-                annual_cost = portfolio_value * expense_ratio
-                st.caption(f"${annual_cost:,.0f}/year on $100k")
-            
-            with col2:
-                aum = etf_info.get('totalAssets', 0)
-                if aum > 0:
-                    aum_b = aum / 1e9
-                    st.metric(
-                        "Assets (AUM)",
-                        f"${aum_b:.1f}B",
-                        help="Total assets under management"
-                    )
-                else:
-                    st.metric("Assets (AUM)", "N/A")
-            
-            with col3:
-                div_yield = etf_info.get('yield', etf_info.get('dividendYield', 0))
-                if div_yield:
-                    st.metric(
-                        "Dividend Yield",
-                        f"{div_yield:.2%}",
-                        help="Annual dividend yield"
-                    )
-                else:
-                    st.metric("Dividend Yield", "N/A")
-            
-            with col4:
-                category = etf_info.get('category', 'N/A')
-                st.metric(
-                    "Category",
-                    category if category else "ETF",
-                    help="Investment category"
-                )
-            
-            # Find Cheaper Alternatives
-            st.markdown("---")
-            st.markdown("#### 💰 Cheaper Alternatives - Save on Fees!")
-            
-            alternatives = get_cheaper_etf_alternatives(selected_etf, expense_ratio)
-            
-            if alternatives and expense_ratio > 0:
-                st.success(f"**Found {len(alternatives)} cheaper alternative(s) for {selected_etf}!**")
+    with tab6:
+        st.markdown("## ⚖️ Compare Against Benchmarks")
+        
+        st.info("""
+            **🎯 Smart Benchmark Selection:** Benchmarks are auto-selected based on your portfolio composition.
+            This ensures you're comparing against the most relevant indices rather than generic ones.
+        """)
+        
+        # Get smart benchmark recommendations
+        smart_benchmarks = get_smart_benchmarks(list(weights.keys()), list(weights.values()))
+        
+        # Display recommended benchmarks
+        st.markdown("### 📊 Auto-Selected Benchmarks")
+        
+        benchmark_info = []
+        for benchmark, reason in smart_benchmarks:
+            benchmark_info.append({
+                'Benchmark': benchmark,
+                'Reason': reason
+            })
+        
+        if benchmark_info:
+            st.dataframe(pd.DataFrame(benchmark_info), use_container_width=True, hide_index=True)
+        
+        # Allow manual additions
+        st.markdown("#### ➕ Add Additional Benchmarks (Optional)")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        additional_benchmarks = []
+        with col1:
+            if st.checkbox("QQQ (Nasdaq 100)", value=False, help="Tech-heavy index"):
+                additional_benchmarks.append(('QQQ', 'Nasdaq 100 comparison'))
+        with col2:
+            if st.checkbox("IWM (Russell 2000)", value=False, help="Small cap index"):
+                additional_benchmarks.append(('IWM', 'Small cap comparison'))
+        with col3:
+            if st.checkbox("VT (Total World)", value=False, help="Global stocks"):
+                additional_benchmarks.append(('VT', 'Global market comparison'))
+        with col4:
+            if st.checkbox("AGG (Total Bond)", value=False, help="Bond market"):
+                additional_benchmarks.append(('AGG', 'Bond market comparison'))
+        
+        # Combine smart and additional benchmarks
+        all_benchmarks = smart_benchmarks + additional_benchmarks
+        
+        # Download benchmark data
+        benchmarks_data = {}
+        benchmarks_metrics = {}
+        
+        for benchmark_symbol, reason in all_benchmarks:
+            if benchmark_symbol == '60/40':
+                # Create synthetic 60/40 portfolio
+                spy_data = download_ticker_data(['SPY'], current['start_date'], current['end_date'])
+                agg_data = download_ticker_data(['AGG'], current['start_date'], current['end_date'])
                 
-                for alt in alternatives:
-                    col1, col2, col3 = st.columns([2, 1, 2])
+                if spy_data is not None and agg_data is not None:
+                    combined_data = pd.DataFrame({
+                        'SPY': spy_data.iloc[:, 0] if isinstance(spy_data, pd.DataFrame) else spy_data,
+                        'AGG': agg_data.iloc[:, 0] if isinstance(agg_data, pd.DataFrame) else agg_data
+                    }).dropna()
                     
-                    with col1:
-                        st.markdown(f"**{alt['symbol']}** - {alt['name']}")
-                        st.caption(f"Tracking: {alt['tracking']}")
-                    
-                    with col2:
-                        st.metric(
-                            "Expense Ratio",
-                            f"{alt['expense_ratio']:.2%}"
-                        )
-                    
-                    with col3:
-                        # Calculate savings
-                        user_portfolio_value = st.number_input(
-                            f"Your {selected_etf} position value ($)",
-                            min_value=1000,
-                            max_value=10000000,
-                            value=100000,
-                            step=10000,
-                            key=f"portfolio_value_{alt['symbol']}",
-                            help="Enter your position size to calculate savings"
-                        )
-                        
-                        savings = calculate_expense_ratio_savings(
-                            expense_ratio,
-                            alt['expense_ratio'],
-                            user_portfolio_value
-                        )
-                        
-                        st.metric(
-                            "Annual Savings",
-                            f"${savings['annual_savings']:,.0f}",
-                            f"{savings['percent_cheaper']:.0f}% cheaper"
-                        )
-                        st.caption(f"20-year savings: ${savings['savings_20y']:,.0f}")
-                
-                # Summary recommendation
-                best_alt = alternatives[0] if alternatives else None
-                if best_alt:
-                    savings = calculate_expense_ratio_savings(
-                        expense_ratio,
-                        best_alt['expense_ratio'],
-                        user_portfolio_value
-                    )
-                    
-                    st.markdown(f"""
-                        <div class="interpretation-box">
-                            <div class="interpretation-title">💡 Recommendation</div>
-                            <p><strong>Switch from {selected_etf} to {best_alt['symbol']}</strong></p>
-                            <ul>
-                                <li>Save <strong>${savings['annual_savings']:,.0f}/year</strong> on a ${user_portfolio_value:,.0f} position</li>
-                                <li>That's <strong>{savings['percent_cheaper']:.0f}% cheaper</strong> for the same exposure</li>
-                                <li>Over 20 years: <strong>${savings['savings_20y']:,.0f}</strong> saved (with compound growth)</li>
-                                <li>Same index, same holdings, same performance - just lower fees!</li>
-                            </ul>
-                            <p><strong>🎯 Action:</strong> If you're in a taxable account, check if switching triggers capital gains tax. 
-                            In tax-advantaged accounts (401k, IRA), switch immediately - no tax impact!</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-            
-            elif expense_ratio > 0:
-                st.info(f"**{selected_etf}** already has competitive fees. No cheaper alternatives found in our database.")
+                    portfolio_6040 = calculate_portfolio_returns(combined_data, np.array([0.6, 0.4]))
+                    benchmarks_data['60/40'] = portfolio_6040
+                    benchmarks_metrics['60/40'] = calculate_portfolio_metrics(portfolio_6040)
             else:
-                st.warning("Could not fetch expense ratio data for this ETF.")
-            
-            # Holdings Information (if available from yfinance)
+                # Download single benchmark
+                bench_data = get_benchmark_data_openbb(benchmark_symbol, current['start_date'], current['end_date'])
+                if bench_data is not None:
+                    bench_returns = bench_data.pct_change().dropna()
+                    bench_returns_series = bench_returns.iloc[:, 0] if isinstance(bench_returns, pd.DataFrame) else bench_returns
+                    benchmarks_data[benchmark_symbol] = bench_returns_series
+                    benchmarks_metrics[benchmark_symbol] = calculate_portfolio_metrics(bench_returns_series)
+        
+        if not benchmarks_data:
+            st.warning("⚠️ Could not load benchmark data. Please check your internet connection.")
+        else:
+            # Enhanced Metrics Comparison Table
             st.markdown("---")
-            st.markdown("#### 📊 Top Holdings")
+            st.markdown("### 📊 Comprehensive Metrics Comparison")
             
-            try:
-                # Try to get holdings data
-                # Note: yfinance may not always have this data
-                st.info("**Note:** Detailed holdings data requires OpenBB. Install OpenBB for comprehensive holdings analysis.")
+            comparison_rows = []
+            
+            # Key metrics to compare
+            metric_configs = [
+                ('Annual Return', 'Annual Return', 'higher_better', '%'),
+                ('Sharpe Ratio', 'Sharpe Ratio', 'higher_better', 'ratio'),
+                ('Sortino Ratio', 'Sortino Ratio', 'higher_better', 'ratio'),
+                ('Max Drawdown', 'Max Drawdown', 'lower_better', '%'),
+                ('Volatility', 'Annual Volatility', 'higher_better', '%'),
+                ('Calmar Ratio', 'Calmar Ratio', 'higher_better', 'ratio'),
+                ('Total Return', 'Total Return', 'higher_better', '%')
+            ]
+            
+            for metric_display, metric_key, comparison_type, format_type in metric_configs:
+                row = {'Metric': metric_display}
                 
-                # Placeholder for future OpenBB integration
-                if OPENBB_AVAILABLE:
-                    etf_data = get_etf_info_openbb(selected_etf)
-                    if etf_data and not etf_data['holdings'].empty:
-                        st.dataframe(etf_data['holdings'].head(10), use_container_width=True)
+                # Add portfolio value
+                port_value = metrics[metric_key]
+                if format_type == '%':
+                    row['Your Portfolio'] = f"{port_value:.2%}"
+                else:
+                    row['Your Portfolio'] = f"{port_value:.2f}"
+                
+                # Add benchmark values with comparison arrows
+                for bench_name, bench_metrics in benchmarks_metrics.items():
+                    bench_value = bench_metrics[metric_key]
+                    
+                    # Determine if portfolio is better
+                    if comparison_type == 'higher_better':
+                        is_better = port_value > bench_value
+                        arrow = " 🟢↑" if is_better else " 🔴↓"
+                    else:  # lower_better
+                        is_better = port_value < bench_value
+                        arrow = " 🟢↑" if is_better else " 🔴↓"
+                    
+                    if format_type == '%':
+                        row[bench_name] = f"{bench_value:.2%}{arrow}"
                     else:
-                        st.caption("Holdings data not available through OpenBB for this ETF.")
-                else:
-                    st.caption("Install OpenBB to see top holdings, sector allocation, and more: `pip install openbb --break-system-packages`")
-            except:
-                st.caption("Holdings data not available.")
+                        row[bench_name] = f"{bench_value:.2f}{arrow}"
+                
+                comparison_rows.append(row)
             
-            # Performance History
+            comparison_df = pd.DataFrame(comparison_rows)
+            st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("""
+                <div style="text-align: center; padding: 10px; background: #f8f9fa; border-radius: 5px; margin-top: 10px;">
+                    <small><strong>Legend:</strong> 🟢↑ = Your portfolio better | 🔴↓ = Benchmark better</small>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Calculate percentile ranking
             st.markdown("---")
-            st.markdown("#### 📈 Performance History")
+            st.markdown("### 🏆 Percentile Ranking")
             
-            # Show simple performance metrics
-            etf_data_prices = download_ticker_data([selected_etf], current['start_date'], current['end_date'])
-            if etf_data_prices is not None:
-                etf_returns = etf_data_prices.pct_change().dropna()
-                etf_metrics = calculate_portfolio_metrics(etf_returns)
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Annual Return", f"{etf_metrics['Annual Return']:.2%}")
-                
-                with col2:
-                    st.metric("Volatility", f"{etf_metrics['Annual Volatility']:.2%}")
-                
-                with col3:
-                    st.metric("Sharpe Ratio", f"{etf_metrics['Sharpe Ratio']:.2f}")
-                
-                with col4:
-                    st.metric("Max Drawdown", f"{etf_metrics['Max Drawdown']:.2%}")
-                
-                # Simple performance chart
-                cum_returns = (1 + etf_returns).cumprod()
-                
-                fig, ax = plt.subplots(figsize=(12, 6))
-                cum_returns.plot(ax=ax, linewidth=2, color='#667eea')
-                ax.set_title(f'{selected_etf} - Cumulative Performance', fontsize=14, fontweight='bold')
-                ax.set_xlabel('Date', fontsize=11)
-                ax.set_ylabel('Cumulative Return', fontsize=11)
-                ax.grid(True, alpha=0.3)
-                ax.set_facecolor('#f8f9fa')
-                fig.patch.set_facecolor('white')
-                plt.tight_layout()
-                st.pyplot(fig)
+            # Collect all Sharpe ratios for ranking
+            all_sharpes = [metrics['Sharpe Ratio']]
+            for bench_metrics in benchmarks_metrics.values():
+                all_sharpes.append(bench_metrics['Sharpe Ratio'])
             
-        except Exception as e:
-            st.error(f"Could not fetch detailed data for {selected_etf}: {str(e)}")
-            st.info("Some ETFs may have limited data available through the free tier.")
-    
-    # Current vs Optimal
-    st.markdown("---")
-    st.markdown("### 📊 Current vs Optimal Allocation")
-    
-    # Calculate optimal weights
-    with st.spinner("Optimizing portfolio..."):
-        optimal_weights = optimize_portfolio(prices, method='max_sharpe')
-        optimal_returns = calculate_portfolio_returns(prices, optimal_weights)
-        optimal_metrics = calculate_portfolio_metrics(optimal_returns)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### Current Allocation")
-        current_weights_df = pd.DataFrame({
-            'Ticker': list(weights.keys()),
-            'Weight': [f"{w*100:.2f}%" for w in weights.values()]
-        })
-        st.dataframe(current_weights_df, use_container_width=True, hide_index=True)
-        
-        fig, ax = plt.subplots(figsize=(8, 8))
-        colors = plt.cm.Set3(range(len(weights)))
-        ax.pie(weights.values(), labels=weights.keys(), autopct='%1.1f%%',
-               colors=colors, startangle=90)
-        ax.set_title('Current Allocation', fontsize=14, fontweight='bold', pad=20)
-        st.pyplot(fig)
-    
-    with col2:
-        st.markdown("#### Optimal Allocation (Max Sharpe)")
-        optimal_weights_dict = {ticker: w for ticker, w in zip(prices.columns, optimal_weights)}
-        optimal_weights_df = pd.DataFrame({
-            'Ticker': list(optimal_weights_dict.keys()),
-            'Weight': [f"{w*100:.2f}%" for w in optimal_weights_dict.values()]
-        })
-        st.dataframe(optimal_weights_df, use_container_width=True, hide_index=True)
-        
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.pie(optimal_weights_dict.values(), labels=optimal_weights_dict.keys(), 
-               autopct='%1.1f%%', colors=colors, startangle=90)
-        ax.set_title('Optimal Allocation', fontsize=14, fontweight='bold', pad=20)
-        st.pyplot(fig)
-    
-    # Metrics Comparison
-    st.markdown("---")
-    st.markdown("### 📈 Performance Comparison")
-    
-    comparison_data = {
-        'Metric': ['Annual Return', 'Volatility', 'Sharpe Ratio', 'Max Drawdown', 'Sortino Ratio'],
-        'Current Portfolio': [
-            f"{metrics['Annual Return']:.2%}",
-            f"{metrics['Annual Volatility']:.2%}",
-            f"{metrics['Sharpe Ratio']:.2f}",
-            f"{metrics['Max Drawdown']:.2%}",
-            f"{metrics['Sortino Ratio']:.2f}"
-        ],
-        'Optimal Portfolio': [
-            f"{optimal_metrics['Annual Return']:.2%}",
-            f"{optimal_metrics['Annual Volatility']:.2%}",
-            f"{optimal_metrics['Sharpe Ratio']:.2f}",
-            f"{optimal_metrics['Max Drawdown']:.2%}",
-            f"{optimal_metrics['Sortino Ratio']:.2f}"
-        ]
-    }
-    
-    comparison_df = pd.DataFrame(comparison_data)
-    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
-    
-    # Optimization interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Should You Switch to Optimal Allocation?</div>
-            <p><strong>What Optimization Does:</strong></p>
-            <ul>
-                <li>Analyzes historical correlations between assets</li>
-                <li>Finds allocation that maximized Sharpe ratio in the PAST</li>
-                <li>Assumes future correlations will be similar to historical</li>
-            </ul>
-            <p><strong>When to Use Optimal Allocation:</strong></p>
-            <ul>
-                <li>Sharpe ratio significantly higher (0.2+ improvement)</li>
-                <li>Similar or better returns with lower volatility</li>
-                <li>You believe historical relationships will continue</li>
-            </ul>
-            <p><strong>⚠️ Important Warnings:</strong></p>
-            <ul>
-                <li><strong>Over-optimization risk:</strong> "Perfect" historical fit may not work going forward</li>
-                <li><strong>Concentration risk:</strong> Optimal allocation often concentrates in few assets</li>
-                <li><strong>Turnover costs:</strong> Switching has transaction costs and tax implications</li>
-                <li><strong>Rebalancing:</strong> Optimal weights change over time - requires monitoring</li>
-            </ul>
-            <p><strong>Conservative Approach:</strong></p>
-            <ul>
-                <li>If optimal Sharpe is only slightly better (< 0.2), stick with current allocation</li>
-                <li>If optimal suggests 80%+ in one asset, that's too concentrated - use judgment</li>
-                <li>Consider a blend: 70% optimal + 30% equal weight</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Efficient Frontier
-    st.markdown("---")
-    st.markdown("### 📊 Efficient Frontier")
-    
-    with st.spinner("Calculating efficient frontier..."):
-        results, weights_array = calculate_efficient_frontier(prices, num_portfolios=500)
-        
-        # Current and optimal portfolio metrics
-        current_annual_return = metrics['Annual Return']
-        current_annual_vol = metrics['Annual Volatility']
-        
-        optimal_annual_return = optimal_metrics['Annual Return']
-        optimal_annual_vol = optimal_metrics['Annual Volatility']
-    
-    fig = plot_efficient_frontier(results, optimal_weights, optimal_annual_return, optimal_annual_vol)
-    
-    # Add current portfolio to plot
-    ax = fig.axes[0]
-    ax.scatter(current_annual_vol, current_annual_return, marker='o', color='blue',
-              s=400, label='Current Portfolio', edgecolors='black', linewidths=2)
-    
-    # Update legend
-    ax.legend(loc='best', frameon=True, shadow=True, fontsize=11)
-    
-    st.pyplot(fig)
-    
-    # Efficient frontier interpretation
-    st.markdown("""
-        <div class="interpretation-box">
-            <div class="interpretation-title">💡 Understanding the Efficient Frontier</div>
-            <p><strong>What This Chart Shows:</strong></p>
-            <ul>
-                <li>Each dot = A possible portfolio allocation</li>
-                <li>X-axis (Volatility) = Risk</li>
-                <li>Y-axis (Return) = Expected Return</li>
-                <li>Color = Sharpe Ratio (brighter yellow = better)</li>
-            </ul>
-            <p><strong>Key Points:</strong></p>
-            <ul>
-                <li><strong>Blue circle:</strong> Your current portfolio</li>
-                <li><strong>Red star:</strong> Optimal portfolio (highest Sharpe)</li>
-                <li><strong>Upper edge:</strong> "Efficient frontier" - best return for each risk level</li>
-            </ul>
-            <p><strong>How to Read Your Position:</strong></p>
-            <ul>
-                <li><strong>Below and left of red star:</strong> You have lower risk but also lower return</li>
-                <li><strong>Above and right of red star:</strong> You have higher risk for the return</li>
-                <li><strong>On the frontier:</strong> You're efficient! Can't improve without changing risk</li>
-                <li><strong>Below the frontier:</strong> You're inefficient - can get better returns for same risk</li>
-            </ul>
-            <p><strong>Action Items:</strong></p>
-            <ul>
-                <li>If you're far below the frontier, consider rebalancing</li>
-                <li>If you're on or near the frontier, you're doing well</li>
-                <li>Remember: This is based on PAST data - future may differ!</li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Action Buttons
-    st.markdown("---")
-    st.markdown("### 🎯 Take Action")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("✅ Apply Optimal Weights", type="primary"):
-            # Update current portfolio with optimal weights
-            st.session_state.portfolios[st.session_state.current_portfolio]['weights'] = optimal_weights_dict
-            st.session_state.portfolios[st.session_state.current_portfolio]['returns'] = optimal_returns
-            st.success("✅ Optimal weights applied! Refresh to see changes in other tabs.")
-            st.balloons()
-    
-    with col2:
-        if st.button("💾 Save as New Portfolio"):
-            new_name = f"{st.session_state.current_portfolio} (Optimized)"
-            st.session_state.portfolios[new_name] = {
-                'tickers': tickers,
-                'weights': optimal_weights_dict,
-                'prices': prices,
-                'returns': optimal_returns,
-                'start_date': current['start_date'],
-                'end_date': current['end_date']
-            }
-            st.success(f"✅ Saved as '{new_name}'")
-    
-    with col3:
-        # Export optimal weights
-        export_weights = pd.DataFrame({
-            'Ticker': list(optimal_weights_dict.keys()),
-            'Weight': list(optimal_weights_dict.values())
-        })
-        csv = export_weights.to_csv(index=False)
-        st.download_button(
-            label="📥 Export Optimal Weights",
-            data=csv,
-            file_name="optimal_weights.csv",
-            mime="text/csv"
-        )
-
-
-
-
-# =============================================================================
-# TAB 8: TRADING SIGNALS
-# =============================================================================
-with tab8:
-    st.markdown("# 🚦 Trading Signals")
-    st.markdown("Multi-indicator trading signals with actionable recommendations")
-    st.markdown("---")
-    
-    if 'prices' in current:
-        prices = current['prices']
-        tickers = current['tickers']
-        
-        # Generate signals for all tickers
-        signals_data = []
-        for ticker in tickers:
-            if ticker in prices.columns:
-                signal = generate_trading_signal(prices[ticker])
-                signals_data.append({
-                    'Ticker': ticker,
-                    'Signal': signal['signal'],
-                    'Action': signal['action'],
-                    'Confidence': f"{signal['confidence']:.0f}%",
-                    'Score': signal['score'],
-                    'RSI': f"{signal['rsi']:.1f}" if not pd.isna(signal['rsi']) else 'N/A',
-                    'Key Signals': ', '.join(signal['signals'][:3])
-                })
-        
-        # Display as table
-        signals_df = pd.DataFrame(signals_data)
-        
-        # Style the table
-        def style_signal(row):
-            if 'STRONG BUY' in row['Signal'] or 'BUY' in row['Signal']:
-                return ['background-color: #d4edda']*len(row)
-            elif 'STRONG SELL' in row['Signal'] or 'SELL' in row['Signal']:
-                return ['background-color: #f8d7da']*len(row)
+            # Calculate percentile
+            portfolio_sharpe = metrics['Sharpe Ratio']
+            better_than_count = sum(1 for s in all_sharpes if portfolio_sharpe > s)
+            percentile = (better_than_count / len(all_sharpes)) * 100
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Your Percentile",
+                    f"{percentile:.0f}th",
+                    help="Based on Sharpe Ratio vs selected benchmarks"
+                )
+            
+            with col2:
+                better_count = sum(1 for _, bench_metrics in benchmarks_metrics.items() 
+                                if metrics['Sharpe Ratio'] > bench_metrics['Sharpe Ratio'])
+                st.metric(
+                    "Benchmarks Beaten",
+                    f"{better_count} of {len(benchmarks_metrics)}",
+                    help="Number of benchmarks you outperformed on Sharpe Ratio"
+                )
+            
+            with col3:
+                rank_text = ""
+                if percentile >= 80:
+                    rank_text = "🌟 Excellent - Top 20%"
+                    rank_color = "success"
+                elif percentile >= 60:
+                    rank_text = "✅ Good - Above Average"
+                    rank_color = "info"
+                elif percentile >= 40:
+                    rank_text = "⚪ Average"
+                    rank_color = "warning"
+                else:
+                    rank_text = "⚠️ Below Average"
+                    rank_color = "error"
+                
+                st.metric("Rating", rank_text)
+            
+            # Interpretation based on ranking
+            if percentile >= 70:
+                st.success(f"""
+                    **🎉 Strong Performance!** Your portfolio is outperforming {percentile:.0f}% of selected benchmarks.
+                    You're delivering better risk-adjusted returns than most standard strategies.
+                """)
+            elif percentile >= 50:
+                st.info(f"""
+                    **✅ Solid Performance:** Your portfolio is in the {percentile:.0f}th percentile.
+                    You're performing above average but there may be room for improvement.
+                """)
             else:
-                return ['background-color: #fff3cd']*len(row)
-        
-        styled_signals = signals_df.style.apply(style_signal, axis=1)
-        st.dataframe(styled_signals, use_container_width=True, hide_index=True)
-        
-        # Detailed breakdown for each ticker
-        st.markdown("---")
-        st.markdown("## 📊 Detailed Analysis")
-        
-        for ticker in tickers:
-            if ticker in prices.columns:
-                with st.expander(f"**{ticker}** - Detailed Technical Analysis"):
-                    signal = generate_trading_signal(prices[ticker])
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if 'BUY' in signal['signal']:
-                            st.success(f"**{signal['signal']}**")
-                        elif 'SELL' in signal['signal']:
-                            st.error(f"**{signal['signal']}**")
-                        else:
-                            st.info(f"**{signal['signal']}**")
-                        st.metric("Confidence", f"{signal['confidence']:.0f}%")
-                    
-                    with col2:
-                        st.metric("Score", signal['score'], help="Range: -6 (strong sell) to +6 (strong buy)")
-                        st.metric("RSI", f"{signal['rsi']:.1f}" if not pd.isna(signal['rsi']) else 'N/A')
-                    
-                    with col3:
-                        st.metric("Action", signal['action'])
-                        if signal['price_vs_sma200'] is not None:
-                            st.metric("vs 200 SMA", f"{signal['price_vs_sma200']:+.2f}%")
-                    
-                    st.markdown("**Key Signals:**")
-                    for sig in signal['signals']:
-                        st.markdown(f"• {sig}")
-    else:
-        st.info("👆 Build a portfolio first to see trading signals")
-
-
-# =============================================================================
-# TAB 9: TECHNICAL CHARTS (DEEP ANALYSIS)
-# =============================================================================
-with tab9:
-    st.markdown("# 📉 Deep Technical Analysis")
-    st.markdown("Comprehensive technical analysis with support/resistance levels and key moving averages")
-    st.markdown("---")
-    
-    if 'prices' in current:
-        prices = current['prices']
-        tickers = current['tickers']
-        
-        # Ticker selection
-        selected_ticker = st.selectbox("Select ETF for Deep Analysis", tickers)
-        
-        if selected_ticker and selected_ticker in prices.columns:
-            ticker_prices = prices[selected_ticker]
+                st.warning(f"""
+                    **⚠️ Performance Review Needed:** Your portfolio is in the {percentile:.0f}th percentile.
+                    Consider reviewing your strategy - several benchmarks are delivering better risk-adjusted returns.
+                """)
             
-            # Calculate all indicators
-            sma_20 = calculate_sma(ticker_prices, 20)
-            sma_50 = calculate_sma(ticker_prices, 50)
-            sma_200 = calculate_sma(ticker_prices, 200)
-            rsi = calculate_rsi(ticker_prices)
-            macd, macd_signal, macd_hist = calculate_macd(ticker_prices)
-            bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(ticker_prices)
-            
-            # Calculate support and resistance
-            support_resistance = calculate_support_resistance(ticker_prices)
-            
-            # Generate trading signal
-            signal = generate_trading_signal(ticker_prices)
-            
-            # Display overall signal
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                if 'BUY' in signal['signal']:
-                    st.success(f"**{signal['signal']}**")
-                elif 'SELL' in signal['signal']:
-                    st.error(f"**{signal['signal']}**")
-                else:
-                    st.info(f"**{signal['signal']}**")
-            
-            with col2:
-                st.metric("Confidence", f"{signal['confidence']:.0f}%")
-            
-            with col3:
-                st.metric("Action", signal['action'])
-            
-            with col4:
-                st.metric("Score", signal['score'])
-            
-            # Key Levels Section
+            # Cumulative Performance Chart
             st.markdown("---")
-            st.markdown("## 🎯 Key Support & Resistance Levels")
+            st.markdown("### 📈 Cumulative Performance Over Time")
             
-            current_price = ticker_prices.iloc[-1]
+            fig, ax = plt.subplots(figsize=(14, 8))
             
-            col1, col2, col3 = st.columns(3)
+            # Plot portfolio
+            cum_returns_portfolio = (1 + portfolio_returns).cumprod()
+            cum_returns_portfolio.plot(ax=ax, linewidth=3, label='Your Portfolio', color='#667eea')
             
-            with col1:
-                st.markdown("**🔴 Resistance Levels**")
-                st.metric("Resistance 2", f"${support_resistance['resistance_2']:.2f}", 
-                         f"{((support_resistance['resistance_2']/current_price - 1)*100):+.2f}%")
-                st.metric("Resistance 1", f"${support_resistance['resistance_1']:.2f}",
-                         f"{((support_resistance['resistance_1']/current_price - 1)*100):+.2f}%")
-                st.metric("Recent High", f"${support_resistance['recent_high']:.2f}",
-                         f"{((support_resistance['recent_high']/current_price - 1)*100):+.2f}%")
+            # Plot benchmarks
+            colors = ['#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6f42c1', '#fd7e14']
+            for i, (name, returns) in enumerate(benchmarks_data.items()):
+                cum_returns_bench = (1 + returns).cumprod()
+                cum_returns_bench.plot(ax=ax, linewidth=2, label=name, 
+                                    color=colors[i % len(colors)], linestyle='--', alpha=0.8)
             
-            with col2:
-                st.markdown("**📍 Current Price**")
-                st.metric("", f"${current_price:.2f}", help="Current market price")
-                st.metric("Pivot Point", f"${support_resistance['pivot']:.2f}",
-                         f"{((support_resistance['pivot']/current_price - 1)*100):+.2f}%")
-            
-            with col3:
-                st.markdown("**🟢 Support Levels**")
-                st.metric("Support 1", f"${support_resistance['support_1']:.2f}",
-                         f"{((support_resistance['support_1']/current_price - 1)*100):+.2f}%")
-                st.metric("Support 2", f"${support_resistance['support_2']:.2f}",
-                         f"{((support_resistance['support_2']/current_price - 1)*100):+.2f}%")
-                st.metric("Recent Low", f"${support_resistance['recent_low']:.2f}",
-                         f"{((support_resistance['recent_low']/current_price - 1)*100):+.2f}%")
-            
-            # Moving Averages Analysis
-            st.markdown("---")
-            st.markdown("## 📏 Moving Averages (Daily Chart)")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if not pd.isna(sma_20.iloc[-1]):
-                    st.metric("20-Day SMA", f"${sma_20.iloc[-1]:.2f}",
-                             f"{((sma_20.iloc[-1]/current_price - 1)*100):+.2f}%")
-            
-            with col2:
-                if not pd.isna(sma_50.iloc[-1]):
-                    st.metric("50-Day SMA", f"${sma_50.iloc[-1]:.2f}",
-                             f"{((sma_50.iloc[-1]/current_price - 1)*100):+.2f}%")
-            
-            with col3:
-                if not pd.isna(sma_200.iloc[-1]):
-                    st.metric("200-Day SMA", f"${sma_200.iloc[-1]:.2f}",
-                             f"{((sma_200.iloc[-1]/current_price - 1)*100):+.2f}%")
-            
-            # Price Chart with Key Levels
-            st.markdown("---")
-            st.markdown("## 📊 Price Chart with Technical Indicators")
-            
-            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 10), 
-                                                gridspec_kw={'height_ratios': [3, 1, 1]})
-            
-            # Main price chart
-            ax1.plot(ticker_prices.index, ticker_prices.values, label='Price', color='black', linewidth=2)
-            
-            # Plot SMAs
-            if not sma_20.isna().all():
-                ax1.plot(sma_20.index, sma_20.values, label='20 SMA', color='blue', alpha=0.7)
-            if not sma_50.isna().all():
-                ax1.plot(sma_50.index, sma_50.values, label='50 SMA', color='orange', alpha=0.7)
-            if not sma_200.isna().all():
-                ax1.plot(sma_200.index, sma_200.values, label='200 SMA', color='red', alpha=0.7)
-            
-            # Plot Bollinger Bands
-            ax1.plot(bb_upper.index, bb_upper.values, 'r--', alpha=0.5, label='BB Upper')
-            ax1.plot(bb_lower.index, bb_lower.values, 'g--', alpha=0.5, label='BB Lower')
-            ax1.fill_between(bb_upper.index, bb_lower.values, bb_upper.values, alpha=0.1)
-            
-            # Plot support/resistance lines (last 100 days)
-            recent_idx = ticker_prices.index[-100:] if len(ticker_prices) > 100 else ticker_prices.index
-            ax1.axhline(y=support_resistance['resistance_1'], color='r', linestyle=':', alpha=0.5, label='R1')
-            ax1.axhline(y=support_resistance['support_1'], color='g', linestyle=':', alpha=0.5, label='S1')
-            ax1.axhline(y=current_price, color='purple', linestyle='-', linewidth=2, label='Current')
-            
-            ax1.set_ylabel('Price ($)', fontsize=12)
-            ax1.set_title(f'{selected_ticker} - Daily Chart with Key Levels', fontsize=14, fontweight='bold')
-            ax1.legend(loc='best', fontsize=9)
-            ax1.grid(True, alpha=0.3)
-            
-            # RSI chart
-            ax2.plot(rsi.index, rsi.values, label='RSI', color='purple', linewidth=2)
-            ax2.axhline(y=70, color='r', linestyle='--', alpha=0.7)
-            ax2.axhline(y=30, color='g', linestyle='--', alpha=0.7)
-            ax2.axhline(y=50, color='gray', linestyle=':', alpha=0.5)
-            ax2.fill_between(rsi.index, 70, 100, alpha=0.1, color='red')
-            ax2.fill_between(rsi.index, 0, 30, alpha=0.1, color='green')
-            ax2.set_ylabel('RSI', fontsize=11)
-            ax2.set_ylim(0, 100)
-            ax2.legend(loc='best', fontsize=9)
-            ax2.grid(True, alpha=0.3)
-            
-            # MACD chart
-            ax3.plot(macd.index, macd.values, label='MACD', color='blue', linewidth=2)
-            ax3.plot(macd_signal.index, macd_signal.values, label='Signal', color='red', linewidth=2)
-            colors = ['green' if x > 0 else 'red' for x in macd_hist.values]
-            ax3.bar(macd_hist.index, macd_hist.values, color=colors, alpha=0.3, label='Histogram')
-            ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-            ax3.set_ylabel('MACD', fontsize=11)
-            ax3.legend(loc='best', fontsize=9)
-            ax3.grid(True, alpha=0.3)
+            ax.set_title('Performance Comparison vs Smart Benchmarks', fontsize=16, fontweight='bold', pad=20)
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Cumulative Return', fontsize=12, fontweight='bold')
+            ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('white')
             
             plt.tight_layout()
             st.pyplot(fig)
             
-            # Technical Summary
+            # Smart interpretation
+            st.markdown("""
+                <div class="interpretation-box">
+                    <div class="interpretation-title">💡 How to Interpret Your Results</div>
+                    <p><strong>Understanding Benchmark Selection:</strong></p>
+                    <ul>
+                        <li>Benchmarks were auto-selected based on your portfolio composition</li>
+                        <li>This ensures you're comparing against relevant indices, not generic ones</li>
+                        <li>A tech-heavy portfolio should compare to QQQ, not just SPY</li>
+                    </ul>
+                    <p><strong>What Good Performance Looks Like:</strong></p>
+                    <ul>
+                        <li><strong>Above most benchmarks:</strong> Your strategy is adding value ✓</li>
+                        <li><strong>Better Sharpe than SPY:</strong> You're delivering superior risk-adjusted returns ✓</li>
+                        <li><strong>70th percentile or higher:</strong> You're outperforming most strategies ✓</li>
+                    </ul>
+                    <p><strong>🚩 Warning Signs:</strong></p>
+                    <ul>
+                        <li><strong>Below 50th percentile:</strong> Majority of benchmarks are beating you</li>
+                        <li><strong>Lower Sharpe than all benchmarks:</strong> Taking more risk for less return</li>
+                        <li><strong>Underperforming SPY consistently:</strong> Consider switching to index fund</li>
+                    </ul>
+                    <p><strong>Decision Framework:</strong></p>
+                    <ul>
+                        <li>If beating most benchmarks: Keep your strategy, it's working!</li>
+                        <li>If average performance: Minor tweaks may help, but acceptable</li>
+                        <li>If below average: Strongly consider switching to best-performing benchmark</li>
+                    </ul>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Rolling Sharpe Comparison
             st.markdown("---")
-            st.markdown("## 📋 Technical Summary")
+            st.markdown("### 📈 Rolling Sharpe Ratio (Risk-Adjusted Performance Over Time)")
             
-            summary_text = f"""
-            **Current Position Analysis:**
-            - Price is {'ABOVE' if current_price > sma_200.iloc[-1] else 'BELOW'} the 200-day SMA (${sma_200.iloc[-1]:.2f})
-            - Distance to Resistance 1: ${support_resistance['resistance_1'] - current_price:.2f} ({((support_resistance['resistance_1']/current_price - 1)*100):.2f}%)
-            - Distance to Support 1: ${current_price - support_resistance['support_1']:.2f} ({((current_price/support_resistance['support_1'] - 1)*100):.2f}%)
+            window = 60
+            portfolio_rolling_sharpe = (portfolio_returns.rolling(window).mean() * 252) / (portfolio_returns.rolling(window).std() * np.sqrt(252))
             
-            **Trend Analysis:**
-            - Short-term (20 SMA): {'Bullish ✅' if current_price > sma_20.iloc[-1] else 'Bearish ❌'}
-            - Medium-term (50 SMA): {'Bullish ✅' if current_price > sma_50.iloc[-1] else 'Bearish ❌'}
-            - Long-term (200 SMA): {'Bullish ✅' if current_price > sma_200.iloc[-1] else 'Bearish ❌'}
+            fig, ax = plt.subplots(figsize=(14, 8))
+            portfolio_rolling_sharpe.plot(ax=ax, linewidth=3, label='Your Portfolio', color='#667eea')
             
-            **Key Signals:**
-            """
+            for i, (name, returns) in enumerate(benchmarks_data.items()):
+                bench_rolling_sharpe = (returns.rolling(window).mean() * 252) / (returns.rolling(window).std() * np.sqrt(252))
+                bench_rolling_sharpe.plot(ax=ax, linewidth=2, label=name,
+                                        color=colors[i % len(colors)], linestyle='--', alpha=0.8)
             
-            for sig in signal['signals']:
-                summary_text += f"\n- {sig}"
+            ax.axhline(y=1, color='#28a745', linestyle=':', linewidth=1.5, alpha=0.7, label='Good (1.0)')
+            ax.axhline(y=0, color='#dc3545', linestyle=':', linewidth=1.5, alpha=0.7)
             
-            st.markdown(summary_text)
+            ax.set_title(f'Rolling {window}-Day Sharpe Ratio Comparison', fontsize=16, fontweight='bold', pad=20)
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Sharpe Ratio', fontsize=12, fontweight='bold')
+            ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('white')
             
-            # Recommendation
-            st.markdown("---")
-            st.markdown("## 💡 Recommendation")
+            plt.tight_layout()
+            st.pyplot(fig)
             
-            if signal['action'] == 'Accumulate':
-                st.success(f"**{signal['action'].upper()}**: Technical indicators suggest this is a good time to add to positions. Consider buying on dips toward support levels.")
-            elif signal['action'] == 'Distribute':
-                st.error(f"**{signal['action'].upper()}**: Technical indicators suggest reducing exposure. Consider taking profits near resistance levels.")
-            else:
-                st.info(f"**{signal['action'].upper()}**: Signals are mixed. Wait for clearer directional confirmation before making changes.")
+            st.markdown("""
+                <div class="interpretation-box">
+                    <div class="interpretation-title">💡 Rolling Sharpe Analysis</div>
+                    <p><strong>What This Shows:</strong> How risk-adjusted returns evolved over time</p>
+                    <p><strong>Key Patterns:</strong></p>
+                    <ul>
+                        <li><strong>Consistently above benchmarks:</strong> Your strategy consistently delivers better risk-adjusted returns</li>
+                        <li><strong>Converges during crises:</strong> All strategies suffer together in major crashes</li>
+                        <li><strong>Diverges in recovery:</strong> Shows which strategy recovers better</li>
+                        <li><strong>Recent trend matters most:</strong> Is your edge improving or deteriorating?</li>
+                    </ul>
+                </div>
+            """, unsafe_allow_html=True)
+
+
+
+    # =============================================================================
+    # TAB 7: OPTIMIZATION
+    # =============================================================================
+
+    with tab7:
+        st.markdown("## 🎯 Portfolio Optimization")
+        st.markdown("""
+            <div class="info-box">
+                <h4>What is Portfolio Optimization?</h4>
+                <p>Find the best allocation of your assets to maximize returns for a given level of risk, 
+                or minimize risk for a given level of returns.</p>
+                <p><strong>Maximum Sharpe Ratio:</strong> Find the allocation with the best risk-adjusted returns.</p>
+            </div>
+        """, unsafe_allow_html=True)
         
-    else:
-        st.info("👆 Build a portfolio first to see technical analysis")
+        # ETF DEEP DIVE (Phase 1 OpenBB Feature)
+        st.markdown("---")
+        st.markdown("### 🔍 ETF Deep Dive - Know What You Own")
+        
+        st.info("""
+            **💰 Optimize Your Costs:** Discover what's inside your ETFs and find cheaper alternatives that track the same index.
+            Small differences in expense ratios compound to thousands of dollars over time!
+        """)
+        
+        # ETF Selector
+        selected_etf = st.selectbox(
+            "Select an ETF to analyze:",
+            list(weights.keys()),
+            help="Choose an ETF from your portfolio to see detailed information"
+        )
+        
+        if selected_etf:
+            # Get expense ratio from yfinance
+            try:
+                etf_ticker = yf.Ticker(selected_etf)
+                etf_info = etf_ticker.info
+                
+                # Basic Information Section
+                st.markdown(f"#### 📋 {selected_etf} - Basic Information")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    expense_ratio = etf_info.get('expenseRatio', 0) if etf_info.get('expenseRatio') else 0
+                    st.metric(
+                        "Expense Ratio",
+                        f"{expense_ratio:.2%}",
+                        help="Annual fee as percentage of investment"
+                    )
+                    portfolio_value = 100000  # Default
+                    annual_cost = portfolio_value * expense_ratio
+                    st.caption(f"${annual_cost:,.0f}/year on $100k")
+                
+                with col2:
+                    aum = etf_info.get('totalAssets', 0)
+                    if aum > 0:
+                        aum_b = aum / 1e9
+                        st.metric(
+                            "Assets (AUM)",
+                            f"${aum_b:.1f}B",
+                            help="Total assets under management"
+                        )
+                    else:
+                        st.metric("Assets (AUM)", "N/A")
+                
+                with col3:
+                    div_yield = etf_info.get('yield', etf_info.get('dividendYield', 0))
+                    if div_yield:
+                        st.metric(
+                            "Dividend Yield",
+                            f"{div_yield:.2%}",
+                            help="Annual dividend yield"
+                        )
+                    else:
+                        st.metric("Dividend Yield", "N/A")
+                
+                with col4:
+                    category = etf_info.get('category', 'N/A')
+                    st.metric(
+                        "Category",
+                        category if category else "ETF",
+                        help="Investment category"
+                    )
+                
+                # Find Cheaper Alternatives
+                st.markdown("---")
+                st.markdown("#### 💰 Cheaper Alternatives - Save on Fees!")
+                
+                alternatives = get_cheaper_etf_alternatives(selected_etf, expense_ratio)
+                
+                if alternatives and expense_ratio > 0:
+                    st.success(f"**Found {len(alternatives)} cheaper alternative(s) for {selected_etf}!**")
+                    
+                    for alt in alternatives:
+                        col1, col2, col3 = st.columns([2, 1, 2])
+                        
+                        with col1:
+                            st.markdown(f"**{alt['symbol']}** - {alt['name']}")
+                            st.caption(f"Tracking: {alt['tracking']}")
+                        
+                        with col2:
+                            st.metric(
+                                "Expense Ratio",
+                                f"{alt['expense_ratio']:.2%}"
+                            )
+                        
+                        with col3:
+                            # Calculate savings
+                            user_portfolio_value = st.number_input(
+                                f"Your {selected_etf} position value ($)",
+                                min_value=1000,
+                                max_value=10000000,
+                                value=100000,
+                                step=10000,
+                                key=f"portfolio_value_{alt['symbol']}",
+                                help="Enter your position size to calculate savings"
+                            )
+                            
+                            savings = calculate_expense_ratio_savings(
+                                expense_ratio,
+                                alt['expense_ratio'],
+                                user_portfolio_value
+                            )
+                            
+                            st.metric(
+                                "Annual Savings",
+                                f"${savings['annual_savings']:,.0f}",
+                                f"{savings['percent_cheaper']:.0f}% cheaper"
+                            )
+                            st.caption(f"20-year savings: ${savings['savings_20y']:,.0f}")
+                    
+                    # Summary recommendation
+                    best_alt = alternatives[0] if alternatives else None
+                    if best_alt:
+                        savings = calculate_expense_ratio_savings(
+                            expense_ratio,
+                            best_alt['expense_ratio'],
+                            user_portfolio_value
+                        )
+                        
+                        st.markdown(f"""
+                            <div class="interpretation-box">
+                                <div class="interpretation-title">💡 Recommendation</div>
+                                <p><strong>Switch from {selected_etf} to {best_alt['symbol']}</strong></p>
+                                <ul>
+                                    <li>Save <strong>${savings['annual_savings']:,.0f}/year</strong> on a ${user_portfolio_value:,.0f} position</li>
+                                    <li>That's <strong>{savings['percent_cheaper']:.0f}% cheaper</strong> for the same exposure</li>
+                                    <li>Over 20 years: <strong>${savings['savings_20y']:,.0f}</strong> saved (with compound growth)</li>
+                                    <li>Same index, same holdings, same performance - just lower fees!</li>
+                                </ul>
+                                <p><strong>🎯 Action:</strong> If you're in a taxable account, check if switching triggers capital gains tax. 
+                                In tax-advantaged accounts (401k, IRA), switch immediately - no tax impact!</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                
+                elif expense_ratio > 0:
+                    st.info(f"**{selected_etf}** already has competitive fees. No cheaper alternatives found in our database.")
+                else:
+                    st.warning("Could not fetch expense ratio data for this ETF.")
+                
+                # Holdings Information (if available from yfinance)
+                st.markdown("---")
+                st.markdown("#### 📊 Top Holdings")
+                
+                try:
+                    # Try to get holdings data
+                    # Note: yfinance may not always have this data
+                    st.info("**Note:** Detailed holdings data requires OpenBB. Install OpenBB for comprehensive holdings analysis.")
+                    
+                    # Placeholder for future OpenBB integration
+                    if OPENBB_AVAILABLE:
+                        etf_data = get_etf_info_openbb(selected_etf)
+                        if etf_data and not etf_data['holdings'].empty:
+                            st.dataframe(etf_data['holdings'].head(10), use_container_width=True)
+                        else:
+                            st.caption("Holdings data not available through OpenBB for this ETF.")
+                    else:
+                        st.caption("Install OpenBB to see top holdings, sector allocation, and more: `pip install openbb --break-system-packages`")
+                except:
+                    st.caption("Holdings data not available.")
+                
+                # Performance History
+                st.markdown("---")
+                st.markdown("#### 📈 Performance History")
+                
+                # Show simple performance metrics
+                etf_data_prices = download_ticker_data([selected_etf], current['start_date'], current['end_date'])
+                if etf_data_prices is not None:
+                    etf_returns = etf_data_prices.pct_change().dropna()
+                    etf_metrics = calculate_portfolio_metrics(etf_returns)
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Annual Return", f"{etf_metrics['Annual Return']:.2%}")
+                    
+                    with col2:
+                        st.metric("Volatility", f"{etf_metrics['Annual Volatility']:.2%}")
+                    
+                    with col3:
+                        st.metric("Sharpe Ratio", f"{etf_metrics['Sharpe Ratio']:.2f}")
+                    
+                    with col4:
+                        st.metric("Max Drawdown", f"{etf_metrics['Max Drawdown']:.2%}")
+                    
+                    # Simple performance chart
+                    cum_returns = (1 + etf_returns).cumprod()
+                    
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    cum_returns.plot(ax=ax, linewidth=2, color='#667eea')
+                    ax.set_title(f'{selected_etf} - Cumulative Performance', fontsize=14, fontweight='bold')
+                    ax.set_xlabel('Date', fontsize=11)
+                    ax.set_ylabel('Cumulative Return', fontsize=11)
+                    ax.grid(True, alpha=0.3)
+                    ax.set_facecolor('#f8f9fa')
+                    fig.patch.set_facecolor('white')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                
+            except Exception as e:
+                st.error(f"Could not fetch detailed data for {selected_etf}: {str(e)}")
+                st.info("Some ETFs may have limited data available through the free tier.")
+        
+        # Current vs Optimal
+        st.markdown("---")
+        st.markdown("### 📊 Current vs Optimal Allocation")
+        
+        # Calculate optimal weights
+        with st.spinner("Optimizing portfolio..."):
+            optimal_weights = optimize_portfolio(prices, method='max_sharpe')
+            optimal_returns = calculate_portfolio_returns(prices, optimal_weights)
+            optimal_metrics = calculate_portfolio_metrics(optimal_returns)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Current Allocation")
+            current_weights_df = pd.DataFrame({
+                'Ticker': list(weights.keys()),
+                'Weight': [f"{w*100:.2f}%" for w in weights.values()]
+            })
+            st.dataframe(current_weights_df, use_container_width=True, hide_index=True)
+            
+            fig, ax = plt.subplots(figsize=(8, 8))
+            colors = plt.cm.Set3(range(len(weights)))
+            ax.pie(weights.values(), labels=weights.keys(), autopct='%1.1f%%',
+                colors=colors, startangle=90)
+            ax.set_title('Current Allocation', fontsize=14, fontweight='bold', pad=20)
+            st.pyplot(fig)
+        
+        with col2:
+            st.markdown("#### Optimal Allocation (Max Sharpe)")
+            optimal_weights_dict = {ticker: w for ticker, w in zip(prices.columns, optimal_weights)}
+            optimal_weights_df = pd.DataFrame({
+                'Ticker': list(optimal_weights_dict.keys()),
+                'Weight': [f"{w*100:.2f}%" for w in optimal_weights_dict.values()]
+            })
+            st.dataframe(optimal_weights_df, use_container_width=True, hide_index=True)
+            
+            fig, ax = plt.subplots(figsize=(8, 8))
+            ax.pie(optimal_weights_dict.values(), labels=optimal_weights_dict.keys(), 
+                autopct='%1.1f%%', colors=colors, startangle=90)
+            ax.set_title('Optimal Allocation', fontsize=14, fontweight='bold', pad=20)
+            st.pyplot(fig)
+        
+        # Metrics Comparison
+        st.markdown("---")
+        st.markdown("### 📈 Performance Comparison")
+        
+        comparison_data = {
+            'Metric': ['Annual Return', 'Volatility', 'Sharpe Ratio', 'Max Drawdown', 'Sortino Ratio'],
+            'Current Portfolio': [
+                f"{metrics['Annual Return']:.2%}",
+                f"{metrics['Annual Volatility']:.2%}",
+                f"{metrics['Sharpe Ratio']:.2f}",
+                f"{metrics['Max Drawdown']:.2%}",
+                f"{metrics['Sortino Ratio']:.2f}"
+            ],
+            'Optimal Portfolio': [
+                f"{optimal_metrics['Annual Return']:.2%}",
+                f"{optimal_metrics['Annual Volatility']:.2%}",
+                f"{optimal_metrics['Sharpe Ratio']:.2f}",
+                f"{optimal_metrics['Max Drawdown']:.2%}",
+                f"{optimal_metrics['Sortino Ratio']:.2f}"
+            ]
+        }
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        
+        # Optimization interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Should You Switch to Optimal Allocation?</div>
+                <p><strong>What Optimization Does:</strong></p>
+                <ul>
+                    <li>Analyzes historical correlations between assets</li>
+                    <li>Finds allocation that maximized Sharpe ratio in the PAST</li>
+                    <li>Assumes future correlations will be similar to historical</li>
+                </ul>
+                <p><strong>When to Use Optimal Allocation:</strong></p>
+                <ul>
+                    <li>Sharpe ratio significantly higher (0.2+ improvement)</li>
+                    <li>Similar or better returns with lower volatility</li>
+                    <li>You believe historical relationships will continue</li>
+                </ul>
+                <p><strong>⚠️ Important Warnings:</strong></p>
+                <ul>
+                    <li><strong>Over-optimization risk:</strong> "Perfect" historical fit may not work going forward</li>
+                    <li><strong>Concentration risk:</strong> Optimal allocation often concentrates in few assets</li>
+                    <li><strong>Turnover costs:</strong> Switching has transaction costs and tax implications</li>
+                    <li><strong>Rebalancing:</strong> Optimal weights change over time - requires monitoring</li>
+                </ul>
+                <p><strong>Conservative Approach:</strong></p>
+                <ul>
+                    <li>If optimal Sharpe is only slightly better (< 0.2), stick with current allocation</li>
+                    <li>If optimal suggests 80%+ in one asset, that's too concentrated - use judgment</li>
+                    <li>Consider a blend: 70% optimal + 30% equal weight</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Efficient Frontier
+        st.markdown("---")
+        st.markdown("### 📊 Efficient Frontier")
+        
+        with st.spinner("Calculating efficient frontier..."):
+            results, weights_array = calculate_efficient_frontier(prices, num_portfolios=500)
+            
+            # Current and optimal portfolio metrics
+            current_annual_return = metrics['Annual Return']
+            current_annual_vol = metrics['Annual Volatility']
+            
+            optimal_annual_return = optimal_metrics['Annual Return']
+            optimal_annual_vol = optimal_metrics['Annual Volatility']
+        
+        fig = plot_efficient_frontier(results, optimal_weights, optimal_annual_return, optimal_annual_vol)
+        
+        # Add current portfolio to plot
+        ax = fig.axes[0]
+        ax.scatter(current_annual_vol, current_annual_return, marker='o', color='blue',
+                s=400, label='Current Portfolio', edgecolors='black', linewidths=2)
+        
+        # Update legend
+        ax.legend(loc='best', frameon=True, shadow=True, fontsize=11)
+        
+        st.pyplot(fig)
+        
+        # Efficient frontier interpretation
+        st.markdown("""
+            <div class="interpretation-box">
+                <div class="interpretation-title">💡 Understanding the Efficient Frontier</div>
+                <p><strong>What This Chart Shows:</strong></p>
+                <ul>
+                    <li>Each dot = A possible portfolio allocation</li>
+                    <li>X-axis (Volatility) = Risk</li>
+                    <li>Y-axis (Return) = Expected Return</li>
+                    <li>Color = Sharpe Ratio (brighter yellow = better)</li>
+                </ul>
+                <p><strong>Key Points:</strong></p>
+                <ul>
+                    <li><strong>Blue circle:</strong> Your current portfolio</li>
+                    <li><strong>Red star:</strong> Optimal portfolio (highest Sharpe)</li>
+                    <li><strong>Upper edge:</strong> "Efficient frontier" - best return for each risk level</li>
+                </ul>
+                <p><strong>How to Read Your Position:</strong></p>
+                <ul>
+                    <li><strong>Below and left of red star:</strong> You have lower risk but also lower return</li>
+                    <li><strong>Above and right of red star:</strong> You have higher risk for the return</li>
+                    <li><strong>On the frontier:</strong> You're efficient! Can't improve without changing risk</li>
+                    <li><strong>Below the frontier:</strong> You're inefficient - can get better returns for same risk</li>
+                </ul>
+                <p><strong>Action Items:</strong></p>
+                <ul>
+                    <li>If you're far below the frontier, consider rebalancing</li>
+                    <li>If you're on or near the frontier, you're doing well</li>
+                    <li>Remember: This is based on PAST data - future may differ!</li>
+                </ul>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Action Buttons
+        st.markdown("---")
+        st.markdown("### 🎯 Take Action")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("✅ Apply Optimal Weights", type="primary"):
+                # Update current portfolio with optimal weights
+                st.session_state.portfolios[st.session_state.current_portfolio]['weights'] = optimal_weights_dict
+                st.session_state.portfolios[st.session_state.current_portfolio]['returns'] = optimal_returns
+                st.success("✅ Optimal weights applied! Refresh to see changes in other tabs.")
+                st.balloons()
+        
+        with col2:
+            if st.button("💾 Save as New Portfolio"):
+                new_name = f"{st.session_state.current_portfolio} (Optimized)"
+                st.session_state.portfolios[new_name] = {
+                    'tickers': tickers,
+                    'weights': optimal_weights_dict,
+                    'prices': prices,
+                    'returns': optimal_returns,
+                    'start_date': current['start_date'],
+                    'end_date': current['end_date']
+                }
+                st.success(f"✅ Saved as '{new_name}'")
+        
+        with col3:
+            # Export optimal weights
+            export_weights = pd.DataFrame({
+                'Ticker': list(optimal_weights_dict.keys()),
+                'Weight': list(optimal_weights_dict.values())
+            })
+            csv = export_weights.to_csv(index=False)
+            st.download_button(
+                label="📥 Export Optimal Weights",
+                data=csv,
+                file_name="optimal_weights.csv",
+                mime="text/csv"
+            )
 
 
+
+
+    # =============================================================================
+    # TAB 8: TRADING SIGNALS
+    # =============================================================================
+    with tab8:
+        st.markdown("# 🚦 Trading Signals")
+        st.markdown("Multi-indicator trading signals with actionable recommendations")
+        st.markdown("---")
+        
+        if 'prices' in current:
+            prices = current['prices']
+            tickers = current['tickers']
+            
+            # Generate signals for all tickers
+            signals_data = []
+            
+            for ticker in tickers:
+                if ticker in prices.columns:
+                    # FIX #1: Pass ticker parameter
+                    signal = generate_trading_signal(prices[ticker], ticker)
+                    
+                    # FIX #2: Defensive handling for Key Signals
+                    sig_list = signal.get('signals', [])
+                    
+                    # Ensure it's a list, not a string
+                    if isinstance(sig_list, str):
+                        # Bug: signals is a string, wrap it in a list
+                        sig_list = [sig_list]
+                    elif not isinstance(sig_list, list):
+                        # Not a string or list, make empty
+                        sig_list = []
+                    
+                    # Join first 3 items (or all if less than 3)
+                    key_signals_text = ', '.join(sig_list[:3]) if sig_list else 'N/A'
+                    
+                    signals_data.append({
+                        'Ticker': ticker,
+                        'Signal': signal['signal'],
+                        'Action': signal['action'],
+                        'Confidence': f"{signal['confidence']:.0f}%",
+                        'Score': signal['score'],
+                        'RSI': f"{signal['rsi']:.1f}" if signal.get('rsi') and not pd.isna(signal['rsi']) else 'N/A',
+                        'Key Signals': key_signals_text
+                    })
+            
+            
+            # Display as table
+            signals_df = pd.DataFrame(signals_data)
+            
+            # Style the table
+            def style_signal(row):
+                if 'STRONG BUY' in row['Signal'] or 'BUY' in row['Signal']:
+                    return ['background-color: #d4edda']*len(row)
+                elif 'STRONG SELL' in row['Signal'] or 'SELL' in row['Signal']:
+                    return ['background-color: #f8d7da']*len(row)
+                else:
+                    return ['background-color: #fff3cd']*len(row)
+            
+            styled_signals = signals_df.style.apply(style_signal, axis=1)
+            st.dataframe(styled_signals, use_container_width=True, hide_index=True)
+            
+            # Detailed breakdown for each ticker
+            st.markdown("---")
+            st.markdown("## 📊 Detailed Analysis")
+            
+            for ticker in tickers:
+                if ticker in prices.columns:
+                    with st.expander(f"**{ticker}** - Detailed Technical Analysis"):
+                        signal = generate_trading_signal(prices[ticker],ticker)
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if 'BUY' in signal['signal']:
+                                st.success(f"**{signal['signal']}**")
+                            elif 'SELL' in signal['signal']:
+                                st.error(f"**{signal['signal']}**")
+                            else:
+                                st.info(f"**{signal['signal']}**")
+                            st.metric("Confidence", f"{signal['confidence']:.0f}%")
+                        
+                        with col2:
+                            st.metric("Score", signal['score'], help="Range: -6 (strong sell) to +6 (strong buy)")
+                            st.metric("RSI", f"{signal['rsi']:.1f}" if not pd.isna(signal['rsi']) else 'N/A')
+                        
+                        with col3:
+                            st.metric("Action", signal['action'])
+                            if signal['price_vs_sma200'] is not None:
+                                st.metric("vs 200 SMA", f"{signal['price_vs_sma200']:+.2f}%")
+                        
+                        st.markdown("**Key Signals:**")
+
+                        # Defensive code: ensure signals is always a list
+                        signal_list = signal.get('signals', [])
+
+                        # Check if signals is a string (BUG) instead of list
+                        if isinstance(signal_list, str):
+                            # Wrap string in a list so it displays as one item
+                            signal_list = [signal_list]
+                        elif not isinstance(signal_list, list):
+                            # Not a string or list - convert to empty list
+                            signal_list = []
+
+                        # Display signals
+                        if signal_list:
+                            for sig in signal_list:
+                                # Each sig should be a string like "Price above 50 SMA"
+                                # NOT individual characters
+                                st.markdown(f"• {sig}")
+                        else:
+                            st.markdown("• No signals available")
+                        #for sig in signal['signal']:
+                        #    st.markdown(f"• {sig}")
+        else:
+            st.info("👆 Build a portfolio first to see trading signals")
+
+
+    # =============================================================================
+    # TAB 9: TECHNICAL CHARTS (DEEP ANALYSIS)
+    # =============================================================================
+    with tab9:
+        st.markdown("# 📉 Deep Technical Analysis")
+        st.markdown("Comprehensive technical analysis with support/resistance levels and key moving averages")
+        st.markdown("---")
+        
+        if 'prices' in current:
+            prices = current['prices']
+            tickers = current['tickers']
+            
+            # Ticker selection
+            selected_ticker = st.selectbox("Select ETF for Deep Analysis", tickers)
+            
+            if selected_ticker and selected_ticker in prices.columns:
+                ticker_prices = prices[selected_ticker]
+                
+                # Calculate all indicators
+                sma_20 = calculate_sma(ticker_prices, 20)
+                sma_50 = calculate_sma(ticker_prices, 50)
+                sma_200 = calculate_sma(ticker_prices, 200)
+                rsi = calculate_rsi(ticker_prices)
+                macd, macd_signal, macd_hist = calculate_macd(ticker_prices)
+                bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(ticker_prices)
+                
+                # Calculate support and resistance
+                support_resistance = calculate_support_resistance(ticker_prices)
+                
+                # Generate trading signal
+                signal = generate_trading_signal(ticker_prices)
+                
+                # Display overall signal
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if 'BUY' in signal['signal']:
+                        st.success(f"**{signal['signal']}**")
+                    elif 'SELL' in signal['signal']:
+                        st.error(f"**{signal['signal']}**")
+                    else:
+                        st.info(f"**{signal['signal']}**")
+                
+                with col2:
+                    st.metric("Confidence", f"{signal['confidence']:.0f}%")
+                
+                with col3:
+                    st.metric("Action", signal['action'])
+                
+                with col4:
+                    st.metric("Score", signal['score'])
+                
+                # Key Levels Section
+                st.markdown("---")
+                st.markdown("## 🎯 Key Support & Resistance Levels")
+                
+                current_price = ticker_prices.iloc[-1]
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**🔴 Resistance Levels**")
+                    st.metric("Resistance 2", f"${support_resistance['resistance_2']:.2f}", 
+                            f"{((support_resistance['resistance_2']/current_price - 1)*100):+.2f}%")
+                    st.metric("Resistance 1", f"${support_resistance['resistance_1']:.2f}",
+                            f"{((support_resistance['resistance_1']/current_price - 1)*100):+.2f}%")
+                    st.metric("Recent High", f"${support_resistance['recent_high']:.2f}",
+                            f"{((support_resistance['recent_high']/current_price - 1)*100):+.2f}%")
+                
+                with col2:
+                    st.markdown("**📍 Current Price**")
+                    st.metric("", f"${current_price:.2f}", help="Current market price")
+                    st.metric("Pivot Point", f"${support_resistance['pivot']:.2f}",
+                            f"{((support_resistance['pivot']/current_price - 1)*100):+.2f}%")
+                
+                with col3:
+                    st.markdown("**🟢 Support Levels**")
+                    st.metric("Support 1", f"${support_resistance['support_1']:.2f}",
+                            f"{((support_resistance['support_1']/current_price - 1)*100):+.2f}%")
+                    st.metric("Support 2", f"${support_resistance['support_2']:.2f}",
+                            f"{((support_resistance['support_2']/current_price - 1)*100):+.2f}%")
+                    st.metric("Recent Low", f"${support_resistance['recent_low']:.2f}",
+                            f"{((support_resistance['recent_low']/current_price - 1)*100):+.2f}%")
+                
+                # Moving Averages Analysis
+                st.markdown("---")
+                st.markdown("## 📏 Moving Averages (Daily Chart)")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if not pd.isna(sma_20.iloc[-1]):
+                        st.metric("20-Day SMA", f"${sma_20.iloc[-1]:.2f}",
+                                f"{((sma_20.iloc[-1]/current_price - 1)*100):+.2f}%")
+                
+                with col2:
+                    if not pd.isna(sma_50.iloc[-1]):
+                        st.metric("50-Day SMA", f"${sma_50.iloc[-1]:.2f}",
+                                f"{((sma_50.iloc[-1]/current_price - 1)*100):+.2f}%")
+                
+                with col3:
+                    if not pd.isna(sma_200.iloc[-1]):
+                        st.metric("200-Day SMA", f"${sma_200.iloc[-1]:.2f}",
+                                f"{((sma_200.iloc[-1]/current_price - 1)*100):+.2f}%")
+                
+                # Price Chart with Key Levels
+                st.markdown("---")
+                st.markdown("## 📊 Price Chart with Technical Indicators")
+                
+                fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 10), 
+                                                    gridspec_kw={'height_ratios': [3, 1, 1]})
+                
+                # Main price chart
+                ax1.plot(ticker_prices.index, ticker_prices.values, label='Price', color='black', linewidth=2)
+                
+                # Plot SMAs
+                if not sma_20.isna().all():
+                    ax1.plot(sma_20.index, sma_20.values, label='20 SMA', color='blue', alpha=0.7)
+                if not sma_50.isna().all():
+                    ax1.plot(sma_50.index, sma_50.values, label='50 SMA', color='orange', alpha=0.7)
+                if not sma_200.isna().all():
+                    ax1.plot(sma_200.index, sma_200.values, label='200 SMA', color='red', alpha=0.7)
+                
+                # Plot Bollinger Bands
+                ax1.plot(bb_upper.index, bb_upper.values, 'r--', alpha=0.5, label='BB Upper')
+                ax1.plot(bb_lower.index, bb_lower.values, 'g--', alpha=0.5, label='BB Lower')
+                ax1.fill_between(bb_upper.index, bb_lower.values, bb_upper.values, alpha=0.1)
+                
+                # Plot support/resistance lines (last 100 days)
+                recent_idx = ticker_prices.index[-100:] if len(ticker_prices) > 100 else ticker_prices.index
+                ax1.axhline(y=support_resistance['resistance_1'], color='r', linestyle=':', alpha=0.5, label='R1')
+                ax1.axhline(y=support_resistance['support_1'], color='g', linestyle=':', alpha=0.5, label='S1')
+                ax1.axhline(y=current_price, color='purple', linestyle='-', linewidth=2, label='Current')
+                
+                ax1.set_ylabel('Price ($)', fontsize=12)
+                ax1.set_title(f'{selected_ticker} - Daily Chart with Key Levels', fontsize=14, fontweight='bold')
+                ax1.legend(loc='best', fontsize=9)
+                ax1.grid(True, alpha=0.3)
+                
+                # RSI chart
+                ax2.plot(rsi.index, rsi.values, label='RSI', color='purple', linewidth=2)
+                ax2.axhline(y=70, color='r', linestyle='--', alpha=0.7)
+                ax2.axhline(y=30, color='g', linestyle='--', alpha=0.7)
+                ax2.axhline(y=50, color='gray', linestyle=':', alpha=0.5)
+                ax2.fill_between(rsi.index, 70, 100, alpha=0.1, color='red')
+                ax2.fill_between(rsi.index, 0, 30, alpha=0.1, color='green')
+                ax2.set_ylabel('RSI', fontsize=11)
+                ax2.set_ylim(0, 100)
+                ax2.legend(loc='best', fontsize=9)
+                ax2.grid(True, alpha=0.3)
+                
+                # MACD chart
+                ax3.plot(macd.index, macd.values, label='MACD', color='blue', linewidth=2)
+                ax3.plot(macd_signal.index, macd_signal.values, label='Signal', color='red', linewidth=2)
+                colors = ['green' if x > 0 else 'red' for x in macd_hist.values]
+                ax3.bar(macd_hist.index, macd_hist.values, color=colors, alpha=0.3, label='Histogram')
+                ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                ax3.set_ylabel('MACD', fontsize=11)
+                ax3.legend(loc='best', fontsize=9)
+                ax3.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                
+                # Technical Summary
+                st.markdown("---")
+                st.markdown("## 📋 Technical Summary")
+                
+                summary_text = f"""
+                **Current Position Analysis:**
+                - Price is {'ABOVE' if current_price > sma_200.iloc[-1] else 'BELOW'} the 200-day SMA (${sma_200.iloc[-1]:.2f})
+                - Distance to Resistance 1: ${support_resistance['resistance_1'] - current_price:.2f} ({((support_resistance['resistance_1']/current_price - 1)*100):.2f}%)
+                - Distance to Support 1: ${current_price - support_resistance['support_1']:.2f} ({((current_price/support_resistance['support_1'] - 1)*100):.2f}%)
+                
+                **Trend Analysis:**
+                - Short-term (20 SMA): {'Bullish ✅' if current_price > sma_20.iloc[-1] else 'Bearish ❌'}
+                - Medium-term (50 SMA): {'Bullish ✅' if current_price > sma_50.iloc[-1] else 'Bearish ❌'}
+                - Long-term (200 SMA): {'Bullish ✅' if current_price > sma_200.iloc[-1] else 'Bearish ❌'}
+                
+                **Key Signals:**
+                """
+                # Defensive code: ensure signals is always a list
+                signal_list = signal.get('signals', [])
+
+                # Check if signals is a string (BUG) instead of list
+                if isinstance(signal_list, str):
+                    # Wrap string in a list so it displays as one item
+                    signal_list = [signal_list]
+                elif not isinstance(signal_list, list):
+                    # Not a string or list - convert to empty list
+                    signal_list = []
+
+                # Display signals
+                if signal_list:
+                    for sig in signal_list:
+                        # Each sig should be a string like "Price above 50 SMA"
+                        # NOT individual characters
+                        st.markdown(f"• {sig}")
+                else:
+                    st.markdown("• No signals available")
+                #for sig in signal['signal']:
+                #    summary_text += f"\n- {sig}"
+                
+                st.markdown(summary_text)
+                
+                # Recommendation
+                st.markdown("---")
+                st.markdown("## 💡 Recommendation")
+                
+                if signal['action'] == 'Accumulate':
+                    st.success(f"**{signal['action'].upper()}**: Technical indicators suggest this is a good time to add to positions. Consider buying on dips toward support levels.")
+                elif signal['action'] == 'Distribute':
+                    st.error(f"**{signal['action'].upper()}**: Technical indicators suggest reducing exposure. Consider taking profits near resistance levels.")
+                else:
+                    st.info(f"**{signal['action'].upper()}**: Signals are mixed. Wait for clearer directional confirmation before making changes.")
+        
+    
+        else:
+            # Portfolio exists - get data and show analysis
+            current = st.session_state.portfolios[st.session_state.current_portfolio]
+            portfolio_returns = current['returns']
+            prices = current['prices']
+            weights = current['weights']
+            tickers = current['tickers']
+            metrics = calculate_portfolio_metrics(portfolio_returns)
 
 
 # =============================================================================
