@@ -1,0 +1,84 @@
+{
+  "Conservative 60/40": {
+    "tickers": ["SPY", "AGG"],
+    "weights": {
+      "SPY": 0.6,
+      "AGG": 0.4
+    },
+    "start_date": "2010-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  },
+  "Aggressive Growth": {
+    "tickers": ["QQQ", "VUG", "IWM"],
+    "weights": {
+      "QQQ": 0.333,
+      "VUG": 0.333,
+      "IWM": 0.334
+    },
+    "start_date": "2010-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Equal Weight"
+  },
+  "Global Diversified": {
+    "tickers": ["SPY", "EFA", "EEM", "AGG", "GLD"],
+    "weights": {
+      "SPY": 0.35,
+      "EFA": 0.20,
+      "EEM": 0.15,
+      "AGG": 0.25,
+      "GLD": 0.05
+    },
+    "start_date": "2010-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  },
+  "Tech Heavy": {
+    "tickers": ["QQQ", "VGT", "ARKK"],
+    "weights": {
+      "QQQ": 0.5,
+      "VGT": 0.3,
+      "ARKK": 0.2
+    },
+    "start_date": "2015-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  },
+  "Income Focused": {
+    "tickers": ["SCHD", "VYM", "JEPI", "AGG"],
+    "weights": {
+      "SCHD": 0.3,
+      "VYM": 0.3,
+      "JEPI": 0.2,
+      "AGG": 0.2
+    },
+    "start_date": "2020-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  },
+  "All-Weather": {
+    "tickers": ["SPY", "TLT", "IEF", "GLD", "DBC"],
+    "weights": {
+      "SPY": 0.30,
+      "TLT": 0.40,
+      "IEF": 0.15,
+      "GLD": 0.075,
+      "DBC": 0.075
+    },
+    "start_date": "2010-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  },
+  "Core Four": {
+    "tickers": ["VTI", "VXUS", "BND", "BNDX"],
+    "weights": {
+      "VTI": 0.42,
+      "VXUS": 0.18,
+      "BND": 0.28,
+      "BNDX": 0.12
+    },
+    "start_date": "2010-01-01",
+    "end_date": "2024-01-01",
+    "allocation_method": "Custom Weights"
+  }
+}
