@@ -362,261 +362,343 @@ def generate_trading_signal(prices, ticker=None):
 
 
 # =============================================================================
-# BOND SIGNAL FUNCTION (Unchanged but included for completeness)
+# ENHANCED BOND SIGNAL LOGIC
+# Replace the generate_bond_signal function with this enhanced version
 # =============================================================================
 
 def generate_bond_signal(prices, ticker):
-    """Bond-specific logic (scores don't apply)"""
-    
-    sma_200 = calculate_sma(prices, 200)
-    current_price = prices.iloc[-1]
-    
-    if len(prices) >= 60:
-        recent_60d_return = (current_price / prices.iloc[-60] - 1) * 100
-    else:
-        recent_60d_return = 0
-    
-    signals_list = []
-    
-    # Bond type
-    if ticker in ['AGG', 'BND']:
-        signals_list.append("Aggregate Bond - diversified bonds")
-    elif ticker in ['TLT', 'IEF']:
-        signals_list.append("Treasury Bond - government backed")
-    elif ticker in ['HYG', 'JNK']:
-        signals_list.append("High Yield - higher risk/return")
-    else:
-        signals_list.append(f"{ticker} - bond fund")
-    
-    # Price vs 200 SMA
-    if not pd.isna(sma_200.iloc[-1]):
-        if current_price > sma_200.iloc[-1]:
-            signals_list.append("Price above 200-day average")
-        else:
-            signals_list.append("Price below 200-day average")
-    
-    # Recent performance
-    if abs(recent_60d_return) < 2:
-        signals_list.append("Flat recent performance")
-    else:
-        signals_list.append(f"{'Up' if recent_60d_return > 0 else 'Down'} {abs(recent_60d_return):.1f}% over 60 days")
-    
-    # Bond recommendation
-    if ticker in ['AGG', 'BND']:
-        signal = "HOLD"
-        confidence = 60
-        recommendation = "Hold for diversification. Bonds are portfolio ballast."
-    elif ticker in ['TLT', 'IEF']:
-        signal = "HOLD"
-        confidence = 55
-        recommendation = "Hold for rate hedge. Monitor Fed policy."
-    elif ticker in ['HYG', 'JNK']:
-        if recent_60d_return > 3:
-            signal = "BUY"
-            confidence = 65
-        elif recent_60d_return < -3:
-            signal = "SELL"
-            confidence = 70
-        else:
-            signal = "HOLD"
-            confidence = 55
-        recommendation = "High yield behaves like stocks. Monitor credit spreads."
-    else:
-        signal = "HOLD"
-        confidence = 60
-        recommendation = "Hold for bond allocation."
-    
-    return {
-        'signal': signal,
-        'action': 'Hold' if signal == 'HOLD' else 'Accumulate' if signal == 'BUY' else 'Distribute',
-        'score': 0,
-        'score_breakdown': {'formula': 'Bonds use different logic (not scored)'},
-        'confidence': confidence,
-        'confidence_breakdown': {'formula': 'Based on bond-specific factors'},
-        'signals': signals_list,
-        'rsi': None,
-        'macd': None,
-        'macd_signal': None,
-        'price_vs_sma50': None,
-        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
-    }
-
-def generate_bond_signal(prices, ticker):
     """
-    Special logic for bond ETFs - bonds are NOT stocks!
+    Enhanced bond-specific logic using proper bond indicators
+    
+    Uses:
+    - Price trends and moving averages
+    - Volatility (standard deviation)
+    - Recent performance
+    - Bond-type specific logic
     """
     
-    # Calculate simple indicators
+    # Calculate indicators
     sma_50 = calculate_sma(prices, 50)
     sma_200 = calculate_sma(prices, 200)
     current_price = prices.iloc[-1]
     
-    # Recent performance
+    # Calculate recent returns
     if len(prices) >= 60:
         recent_60d_return = (current_price / prices.iloc[-60] - 1) * 100
     else:
         recent_60d_return = 0
     
-    # Initialize signals list (LIST, not string!)
+    if len(prices) >= 20:
+        recent_20d_return = (current_price / prices.iloc[-20] - 1) * 100
+    else:
+        recent_20d_return = 0
+    
+    # Calculate volatility (rolling 60-day)
+    if len(prices) >= 60:
+        returns = prices.pct_change()
+        volatility_60d = returns.tail(60).std() * np.sqrt(252) * 100  # Annualized
+    else:
+        volatility_60d = 0
+    
+    # Initialize signals list
     signals_list = []
     
     # Bond type classification
-    if ticker in ['TLT', 'IEF', 'TLH']:
-        bond_type = "Long-term Treasury"
-        signals_list.append(f"{bond_type} - sensitive to interest rates")
+    if ticker in ['AGG', 'BND']:
+        bond_type = "Aggregate"
+        bond_category = "CORE"
+    elif ticker in ['TLT', 'IEF', 'TLH']:
+        bond_type = "Treasury"
+        bond_category = "TACTICAL"
     elif ticker in ['SHY', 'VCSH', 'BSV', 'VGSH']:
-        bond_type = "Short-term"
-        signals_list.append(f"{bond_type} - minimal rate risk")
-    elif ticker in ['LQD', 'VCIT', 'BIV']:
-        bond_type = "Investment Grade Corporate"
-        signals_list.append(f"{bond_type} - credit + rate risk")
+        bond_type = "Short-Term"
+        bond_category = "CASH_ALTERNATIVE"
     elif ticker in ['HYG', 'JNK']:
         bond_type = "High Yield"
-        signals_list.append(f"{bond_type} - acts like stocks")
+        bond_category = "EQUITY_LIKE"
     elif ticker in ['TIP']:
         bond_type = "Inflation Protected"
-        signals_list.append(f"{bond_type} - inflation hedge")
+        bond_category = "INFLATION_HEDGE"
+    elif ticker in ['LQD', 'VCIT', 'BIV']:
+        bond_type = "Investment Grade Corporate"
+        bond_category = "CORE"
     elif ticker in ['MUB']:
         bond_type = "Municipal"
-        signals_list.append(f"{bond_type} - tax-advantaged")
+        bond_category = "TAX_ADVANTAGED"
     else:
-        bond_type = "Aggregate Bond"
-        signals_list.append(f"{bond_type} - diversified bonds")
+        bond_type = "Bond"
+        bond_category = "UNKNOWN"
     
-    # Trend check
-    if not pd.isna(sma_200.iloc[-1]):
-        if current_price > sma_200.iloc[-1]:
-            signals_list.append("Price above 200-day average")
-            trend_positive = True
+    signals_list.append(f"{bond_type} bond - {ticker}")
+    
+    # =============================================================================
+    # ANALYSIS COMPONENTS
+    # =============================================================================
+    
+    # Trend Analysis
+    if not pd.isna(sma_50.iloc[-1]) and not pd.isna(sma_200.iloc[-1]):
+        price_above_50 = current_price > sma_50.iloc[-1]
+        price_above_200 = current_price > sma_200.iloc[-1]
+        sma50_above_200 = sma_50.iloc[-1] > sma_200.iloc[-1]
+        
+        if price_above_50 and price_above_200 and sma50_above_200:
+            trend = "Strong Uptrend"
+            trend_bullish = True
+            signals_list.append("Strong uptrend (price rising)")
+        elif price_above_200:
+            trend = "Uptrend"
+            trend_bullish = True
+            signals_list.append("Uptrend (above 200-day average)")
+        elif not price_above_50 and not price_above_200 and not sma50_above_200:
+            trend = "Strong Downtrend"
+            trend_bullish = False
+            signals_list.append("Strong downtrend (price falling)")
+        elif not price_above_200:
+            trend = "Downtrend"
+            trend_bullish = False
+            signals_list.append("Downtrend (below 200-day average)")
         else:
-            signals_list.append("Price below 200-day average")
-            trend_positive = False
+            trend = "Sideways"
+            trend_bullish = None
+            signals_list.append("Sideways trend")
     else:
-        trend_positive = None
+        trend = "Unclear"
+        trend_bullish = None
+        signals_list.append("Insufficient trend data")
     
-    # Recent performance
-    if recent_60d_return > 2:
-        signals_list.append(f"Up {recent_60d_return:.1f}% over 60 days")
-    elif recent_60d_return < -2:
-        signals_list.append(f"Down {abs(recent_60d_return):.1f}% over 60 days")
+    # Recent Performance
+    if abs(recent_60d_return) >= 2:
+        direction = "up" if recent_60d_return > 0 else "down"
+        signals_list.append(f"Recent 60-day: {direction} {abs(recent_60d_return):.1f}%")
     else:
         signals_list.append("Flat recent performance")
     
+    # Volatility Assessment
+    if volatility_60d > 15:
+        signals_list.append(f"High volatility ({volatility_60d:.1f}%)")
+        high_vol = True
+    elif volatility_60d > 8:
+        signals_list.append(f"Moderate volatility ({volatility_60d:.1f}%)")
+        high_vol = False
+    else:
+        signals_list.append(f"Low volatility ({volatility_60d:.1f}%)")
+        high_vol = False
+    
     # =============================================================================
-    # BOND-SPECIFIC RECOMMENDATIONS
+    # CATEGORY-SPECIFIC LOGIC
     # =============================================================================
     
-    # AGG/BND - Always HOLD for diversification
-    if ticker in ['AGG', 'BND']:
+    if bond_category == "CORE":
+        # AGG, BND, LQD - ALWAYS HOLD (diversifiers)
         signal = "HOLD"
         action = "Hold"
         confidence = 60
-        recommendation = "Hold for diversification. Bonds are portfolio ballast."
-        actionable_notes = [
-            "AGG/BND are diversifiers, not trading vehicles",
+        recommendation = f"Hold {bond_type} bonds for diversification and stability."
+        
+        reasoning = [
+            f"{bond_type} bonds are portfolio ballast",
             "Hold 20-40% bonds based on risk tolerance",
-            "Rebalance when allocation drifts"
+            "Rebalance when stock/bond allocation drifts"
         ]
     
-    # TLT/IEF - Tactical based on rates
-    elif ticker in ['TLT', 'IEF']:
-        if trend_positive and recent_60d_return > 3:
+    elif bond_category == "TACTICAL":
+        # TLT, IEF - Trade based on interest rate outlook
+        
+        # Strong bullish conditions: uptrend + positive returns
+        if trend_bullish and recent_60d_return > 3 and recent_20d_return > 1:
             signal = "BUY"
             action = "Accumulate"
-            confidence = 70
-            recommendation = "Rates falling = bond prices rising. Tactical buy."
-            actionable_notes = [
-                "Long bonds benefit from rate cuts",
-                "High duration = high volatility",
-                "Use 10-15% max allocation"
+            confidence = 75
+            recommendation = "Interest rates falling - bond prices rising. Tactical buy opportunity."
+            reasoning = [
+                "Bond prices rising (rates falling)",
+                "Use as rate hedge in 10-15% allocation",
+                "Monitor Fed policy for reversal"
             ]
-        elif trend_positive:
+        
+        # Moderate bullish: uptrend but weak recent returns
+        elif trend_bullish and recent_60d_return > 0:
             signal = "HOLD"
             action = "Hold"
             confidence = 60
-            recommendation = "Hold current allocation. Monitor rates."
-            actionable_notes = ["Long bonds are rate hedges", "Use cautiously"]
+            recommendation = "Uptrend intact but momentum weak. Hold current position."
+            reasoning = [
+                "Uptrend but slowing momentum",
+                "Wait for stronger confirmation to add",
+                "Good for rate hedging"
+            ]
+        
+        # Bearish: downtrend and negative returns
+        elif not trend_bullish and recent_60d_return < -3 and recent_20d_return < -1:
+            signal = "SELL"
+            action = "Distribute"
+            confidence = 70
+            recommendation = "Interest rates rising - bond prices falling. Reduce exposure."
+            reasoning = [
+                "Bond prices falling (rates rising)",
+                "High duration = high rate sensitivity",
+                "Consider shorter duration bonds"
+            ]
+        
+        # Weak bearish or mixed
         else:
             signal = "HOLD"
             action = "Hold"
             confidence = 50
-            recommendation = "Neutral. Wait for clearer rate trend."
-            actionable_notes = ["TLT is tactical, not core"]
+            recommendation = "Mixed signals. Hold current allocation or wait for clarity."
+            reasoning = [
+                "Unclear trend direction",
+                "Monitor Fed policy and rate expectations",
+                "Avoid adding until trend clarifies"
+            ]
     
-    # SHY - Always hold (cash alternative)
-    elif ticker in ['SHY', 'VCSH', 'BSV', 'VGSH']:
+    elif bond_category == "CASH_ALTERNATIVE":
+        # SHY, VCSH - Always hold (cash substitute)
         signal = "HOLD"
         action = "Hold"
         confidence = 65
-        recommendation = "Hold for stability. Short bonds = cash alternative."
-        actionable_notes = [
-            "Short bonds have minimal volatility",
-            "Good when rates rising",
-            "Use as cash substitute"
+        recommendation = "Short-term bonds as cash alternative. Minimal rate risk."
+        
+        reasoning = [
+            "Short duration = minimal volatility",
+            "Use for cash allocation (emergency fund)",
+            "Good when rates rising"
         ]
     
-    # HYG/JNK - Treat more like stocks
-    elif ticker in ['HYG', 'JNK']:
-        if trend_positive and recent_60d_return > 3:
+    elif bond_category == "EQUITY_LIKE":
+        # HYG, JNK - Trade like stocks (high volatility)
+        
+        # Strong bullish: uptrend + strong returns + low volatility spike
+        if trend_bullish and recent_60d_return > 5 and recent_20d_return > 1.5 and not high_vol:
+            signal = "BUY"
+            action = "Accumulate"
+            confidence = 70
+            recommendation = "High yield strong - credit spreads tightening. Risk-on environment."
+            reasoning = [
+                "Credit spreads tightening (economy strong)",
+                "High yield performs well in bull markets",
+                "Limit to 5-10% allocation (still risky)"
+            ]
+        
+        # Moderate bullish
+        elif trend_bullish and recent_60d_return > 2:
+            signal = "HOLD"
+            action = "Hold"
+            confidence = 60
+            recommendation = "High yield performing well. Hold current position."
+            reasoning = [
+                "Positive trend but watch for reversal",
+                "High yield correlates with stocks (~0.70)",
+                "Monitor economic indicators"
+            ]
+        
+        # Bearish: downtrend + negative returns OR high volatility spike
+        elif (not trend_bullish and recent_60d_return < -3) or (high_vol and volatility_60d > 20):
+            signal = "SELL"
+            action = "Distribute"
+            confidence = 80
+            recommendation = "High yield weakness - recession risk or credit stress. Exit position."
+            reasoning = [
+                "Credit spreads widening (recession risk)",
+                "High yield crashes in recessions (-20% to -30%)",
+                "Switch to quality bonds (AGG, TLT)"
+            ]
+        
+        # Mixed signals
+        else:
+            signal = "HOLD"
+            action = "Hold"
+            confidence = 50
+            recommendation = "Mixed signals. Monitor for clear trend."
+            reasoning = [
+                "High yield is volatile - wait for clarity",
+                "Watch credit spreads and economic data",
+                "Can reverse quickly"
+            ]
+    
+    elif bond_category == "INFLATION_HEDGE":
+        # TIP - Hold for inflation protection
+        
+        if recent_60d_return > 3 and trend_bullish:
             signal = "BUY"
             action = "Accumulate"
             confidence = 65
-            recommendation = "High yield strong. Credit spreads tightening."
-            actionable_notes = [
-                "High yield behaves like stocks",
-                "Use in risk-on environments",
-                "5-10% max allocation"
-            ]
-        elif not trend_positive:
-            signal = "SELL"
-            action = "Distribute"
-            confidence = 70
-            recommendation = "High yield weakness = recession risk."
-            actionable_notes = [
-                "HYG/JNK sell off in recessions",
-                "Switch to quality in stress"
+            recommendation = "Inflation expectations rising. TIPS provide real yield protection."
+            reasoning = [
+                "Principal adjusts with CPI inflation",
+                "Use 10-15% allocation in inflationary periods",
+                "Better than nominal bonds when inflation rising"
             ]
         else:
             signal = "HOLD"
             action = "Hold"
-            confidence = 55
-            recommendation = "Neutral. Monitor economic data."
-            actionable_notes = ["High yield for income, not safety"]
+            confidence = 60
+            recommendation = "Hold TIPS for inflation protection."
+            reasoning = [
+                "Real yield protection from inflation",
+                "Useful hedge in uncertain inflation environment",
+                "Underperforms when inflation stable/falling"
+            ]
     
-    # TIP - Hold for inflation protection
-    elif ticker == 'TIP':
+    elif bond_category == "TAX_ADVANTAGED":
+        # MUB - Municipal bonds
         signal = "HOLD"
         action = "Hold"
         confidence = 60
-        recommendation = "Hold for inflation protection."
-        actionable_notes = [
-            "TIP adjusts for inflation",
-            "Use 10-15% if inflation concerns",
-            "Real yield protection"
+        recommendation = "Municipal bonds for tax-advantaged income (if in high tax bracket)."
+        
+        reasoning = [
+            "Tax-free interest for federal (sometimes state) taxes",
+            "Best for taxable accounts in high tax brackets",
+            "Equivalent taxable yield depends on tax rate"
         ]
     
-    # Default for other bonds
     else:
+        # Unknown bond type - conservative
         signal = "HOLD"
         action = "Hold"
-        confidence = 60
-        recommendation = "Hold for diversification."
-        actionable_notes = ["Bonds stabilize portfolios"]
+        confidence = 55
+        recommendation = "Hold for bond allocation."
+        reasoning = ["Insufficient data for this bond type"]
+    
+    # =============================================================================
+    # RETURN RESULTS
+    # =============================================================================
     
     return {
         'signal': signal,
         'action': action,
-        'score': 0,
+        'score': 0,  # Bonds don't use scoring
+        'score_breakdown': {
+            'formula': f'{bond_type} bonds use different logic (not scored)',
+            'computation': [
+                f"Category: {bond_category}",
+                f"Trend: {trend}",
+                f"60-day return: {recent_60d_return:+.1f}%",
+                f"Volatility: {volatility_60d:.1f}%"
+            ]
+        },
         'confidence': confidence,
-        'trend_direction': 'N/A (Bond)',
-        'signals': signals_list,  # THIS IS A LIST!
+        'confidence_breakdown': {
+            'formula': f'Based on {bond_type} bond-specific factors',
+            'base': confidence,
+            'agreement_bonus': 0,
+            'total': confidence
+        },
+        'signals': signals_list,
         'recommendation': recommendation,
-        'actionable_notes': actionable_notes,
+        'reasoning': reasoning,
         'rsi': None,
         'macd': None,
         'macd_signal': None,
-        'price_vs_sma50': None,
-        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
+        'price_vs_sma50': ((current_price / sma_50.iloc[-1]) - 1) * 100 if not pd.isna(sma_50.iloc[-1]) else None,
+        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None,
+        'bond_metrics': {
+            'recent_60d_return': recent_60d_return,
+            'recent_20d_return': recent_20d_return,
+            'volatility_60d': volatility_60d,
+            'trend': trend
+        }
     }
 
 
@@ -6239,75 +6321,85 @@ else:
                         if signal.get('price_vs_sma200') is not None:
                             sma_help = "Price distance from 200-day moving average\n• Positive: Above (bullish)\n• Negative: Below (bearish)"
                             st.metric("vs 200 SMA", f"{signal['price_vs_sma200']:+.2f}%", help=sma_help)
-                        st.markdown("---")
-            
-                        # Score Breakdown Expander
-                        with st.expander("📊 **Score Calculation Breakdown**", expanded=False):
-                            if 'score_breakdown' in signal:
-                                sb = signal['score_breakdown']
-                                
-                                col_a, col_b, col_c, col_d = st.columns(4)
-                                
-                                with col_a:
-                                    st.metric("Trend", f"{sb.get('trend', 0):+.1f}", help="Maximum ±3 points")
-                                with col_b:
-                                    st.metric("Momentum", f"{sb.get('momentum', 0):+.1f}", help="Maximum ±2 points")
-                                with col_c:
-                                    st.metric("Extremes", f"{sb.get('extremes', 0):+.2f}", help="Maximum ±1 point")
-                                with col_d:
-                                    st.metric("Total", f"{sb.get('total', 0):+.1f}", help="Range: -6 to +6")
-                                
-                                st.markdown("**How Score is Calculated:**")
-                                if 'computation' in sb:
-                                    for comp in sb['computation']:
-                                        st.markdown(f"• {comp}")
-                                
-                                st.markdown(f"\n**Formula:** {sb.get('formula', 'N/A')}")
-                            else:
-                                st.info("Score breakdown not available for bonds (bonds use different logic)")
-                        
-                        # Confidence Breakdown Expander
-                        with st.expander("🎯 **Confidence Calculation**", expanded=False):
-                            if 'confidence_breakdown' in signal:
-                                cb = signal['confidence_breakdown']
-                                
-                                st.markdown(f"**Base Confidence:** {cb.get('base', 0):.0f}% (from score magnitude)")
-                                st.markdown(f"**Agreement Bonus:** +{cb.get('agreement_bonus', 0)}% (when all indicators agree)")
-                                st.markdown(f"**Total Confidence:** {cb.get('total', 0):.0f}%")
-                                st.markdown(f"\n**Formula:** {cb.get('formula', 'N/A')}")
-                                
-                                st.markdown("\n**What Confidence Means:**")
-                                st.markdown("• **80-100%:** High conviction - all indicators aligned")
-                                st.markdown("• **60-79%:** Moderate conviction - most indicators agree")
-                                st.markdown("• **40-59%:** Low conviction - mixed signals")
-                                st.markdown("• **<40%:** Very low conviction - weak or conflicting signals")
-                            else:
-                                st.info("Confidence breakdown not available")
-                        
-                        st.markdown("---")
+                    
+                    # END of columns - create new layout
+                    st.markdown("---")
+                    
+                    # Two-column layout: Key Signals (left) + Breakdowns (right)
+                    col_left, col_right = st.columns([1, 1])
+                    
+                    # LEFT COLUMN: Key Signals
+                    with col_left:
                         st.markdown("**Key Signals:**")
-
-                        # Defensive code: ensure signals is always a list
                         signal_list = signal.get('signals', [])
-
-                        # Check if signals is a string (BUG) instead of list
                         if isinstance(signal_list, str):
-                            # Wrap string in a list so it displays as one item
                             signal_list = [signal_list]
                         elif not isinstance(signal_list, list):
-                            # Not a string or list - convert to empty list
                             signal_list = []
-
-                        # Display signals
+                        
                         if signal_list:
                             for sig in signal_list:
-                                # Each sig should be a string like "Price above 50 SMA"
-                                # NOT individual characters
                                 st.markdown(f"• {sig}")
                         else:
                             st.markdown("• No signals available")
-                        #for sig in signal['signal']:
-                        #    st.markdown(f"• {sig}")
+                    
+                    # RIGHT COLUMN: Score and Confidence Details (NO EXPANDERS - ALWAYS VISIBLE)
+                    with col_right:
+                        # Score Breakdown (always shown)
+                        st.markdown("**📊 Score Breakdown:**")
+                        if 'score_breakdown' in signal:
+                            sb = signal['score_breakdown']
+                            
+                            # Show metrics in a compact row
+                            metric_cols = st.columns(4)
+                            with metric_cols[0]:
+                                st.metric("Trend", f"{sb.get('trend', 0):+.1f}", help="Max ±3")
+                            with metric_cols[1]:
+                                st.metric("Momentum", f"{sb.get('momentum', 0):+.1f}", help="Max ±2")
+                            with metric_cols[2]:
+                                st.metric("Extremes", f"{sb.get('extremes', 0):+.2f}", help="Max ±1")
+                            with metric_cols[3]:
+                                st.metric("Total", f"{sb.get('total', 0):+.1f}", help="-6 to +6")
+                            
+                            # Show computation details
+                            if 'computation' in sb:
+                                for comp in sb['computation'][:3]:  # Show first 3
+                                    st.caption(f"• {comp}")
+                            
+                            st.caption(f"**Formula:** {sb.get('formula', 'N/A')}")
+                        else:
+                            st.info("Score breakdown not available for bonds")
+                        
+                        st.markdown("")  # Space
+                        
+                        # Confidence Breakdown (always shown)
+                        st.markdown("**🎯 Confidence Breakdown:**")
+                        if 'confidence_breakdown' in signal:
+                            cb = signal['confidence_breakdown']
+                            
+                            # Show metrics in a compact row
+                            conf_cols = st.columns(3)
+                            with conf_cols[0]:
+                                st.metric("Base", f"{cb.get('base', 0):.0f}%", help="From score")
+                            with conf_cols[1]:
+                                st.metric("Bonus", f"+{cb.get('agreement_bonus', 0)}%", help="Agreement")
+                            with conf_cols[2]:
+                                st.metric("Total", f"{cb.get('total', 0):.0f}%")
+                            
+                            st.caption(f"**Formula:** {cb.get('formula', 'N/A')}")
+                            
+                            # Confidence meaning with color indicator
+                            total = cb.get('total', 0)
+                            if total >= 80:
+                                st.caption("🟢 High conviction - all indicators aligned")
+                            elif total >= 60:
+                                st.caption("🟡 Moderate conviction - most indicators agree")
+                            elif total >= 40:
+                                st.caption("🟠 Low conviction - mixed signals")
+                            else:
+                                st.caption("🔴 Very low conviction - weak signals")
+                        else:
+                            st.info("Confidence breakdown not available for bonds")
         else:
             st.info("👆 Build a portfolio first to see trading signals")
 
