@@ -6120,139 +6120,132 @@ else:
                 if ticker in prices.columns:
                     with st.expander(f"**{ticker}** - Detailed Technical Analysis"):
                         signal = generate_trading_signal(prices[ticker],ticker)
-                        
                         col1, col2, col3 = st.columns(3)
-            
-                    with col1:
-                        if 'BUY' in signal['signal']:
-                            st.success(f"**{signal['signal']}**")
-                        elif 'SELL' in signal['signal']:
-                            st.error(f"**{signal['signal']}**")
-                        else:
-                            st.info(f"**{signal['signal']}**")
                         
-                        # Confidence with tooltip
-                        conf_help = (
-                            "**How Confidence is Calculated:**\n\n"
-                            "Base = |Score| × 15%\n"
-                            "Agreement Bonus = +10% if all indicators agree\n"
-                            "Total = Base + Bonus (max 100%)\n\n"
-                            "**Interpretation:**\n"
-                            "• 80-100%: High conviction - all indicators aligned\n"
-                            "• 60-79%: Moderate conviction - most indicators agree\n"
-                            "• 40-59%: Low conviction - mixed signals\n"
-                            "• <40%: Very low conviction - weak signals"
-                        )
-                        st.metric("Confidence", f"{signal['confidence']:.0f}%", help=conf_help)
-                    
-                    with col2:
-                        # Score with tooltip
-                        score_help = (
-                            "**Score Range: -6 to +6**\n\n"
-                            "**Components:**\n"
-                            "• Trend: ±3 points (most important)\n"
-                            "• Momentum: ±2 points (confirms trend)\n"
-                            "• Extremes: ±1 point (timing)\n\n"
-                            "**Thresholds:**\n"
-                            "• ≥4: STRONG BUY\n"
-                            "• ≥2: BUY\n"
-                            "• -2 to +2: HOLD\n"
-                            "• ≤-2: SELL\n"
-                            "• ≤-4: STRONG SELL"
-                        )
-                        st.metric("Score", signal['score'], help=score_help)
-                        
-                        rsi_help = "Relative Strength Index (0-100)\n• <30: Oversold\n• >70: Overbought\n• 40-60: Neutral"
-                        st.metric(
-                            "RSI",
-                            f"{signal['rsi']:.1f}" if signal.get('rsi') and not pd.isna(signal['rsi']) else 'N/A',
-                            help=rsi_help
-                        )
-            
-                    with col3:
-                        st.metric("Action", signal['action'])
-                        if signal.get('price_vs_sma200') is not None:
-                            sma_help = "Price distance from 200-day moving average\n• Positive: Above (bullish)\n• Negative: Below (bearish)"
-                            st.metric("vs 200 SMA", f"{signal['price_vs_sma200']:+.2f}%", help=sma_help)
-                    
-                    # END of columns - create new layout
-                    st.markdown("---")
-                    
-                    # Two-column layout: Key Signals (left) + Breakdowns (right)
-                    col_left, col_right = st.columns([1, 1])
-                    
-                    # LEFT COLUMN: Key Signals
-                    with col_left:
-                        st.markdown("**Key Signals:**")
-                        signal_list = signal.get('signals', [])
-                        if isinstance(signal_list, str):
-                            signal_list = [signal_list]
-                        elif not isinstance(signal_list, list):
-                            signal_list = []
-                        
-                        if signal_list:
-                            for sig in signal_list:
-                                st.markdown(f"• {sig}")
-                        else:
-                            st.markdown("• No signals available")
-                    
-                    # RIGHT COLUMN: Score and Confidence Details (NO EXPANDERS - ALWAYS VISIBLE)
-                    with col_right:
-                        # Score Breakdown (always shown)
-                        st.markdown("**📊 Score Breakdown:**")
-                        if 'score_breakdown' in signal:
-                            sb = signal['score_breakdown']
-                            
-                            # Show metrics in a compact row
-                            metric_cols = st.columns(4)
-                            with metric_cols[0]:
-                                st.metric("Trend", f"{sb.get('trend', 0):+.1f}", help="Max ±3")
-                            with metric_cols[1]:
-                                st.metric("Momentum", f"{sb.get('momentum', 0):+.1f}", help="Max ±2")
-                            with metric_cols[2]:
-                                st.metric("Extremes", f"{sb.get('extremes', 0):+.2f}", help="Max ±1")
-                            with metric_cols[3]:
-                                st.metric("Total", f"{sb.get('total', 0):+.1f}", help="-6 to +6")
-                            
-                            # Show computation details
-                            if 'computation' in sb:
-                                for comp in sb['computation'][:3]:  # Show first 3
-                                    st.caption(f"• {comp}")
-                            
-                            st.caption(f"**Formula:** {sb.get('formula', 'N/A')}")
-                        else:
-                            st.info("Score breakdown not available for bonds")
-                        
-                        st.markdown("")  # Space
-                        
-                        # Confidence Breakdown (always shown)
-                        st.markdown("**🎯 Confidence Breakdown:**")
-                        if 'confidence_breakdown' in signal:
-                            cb = signal['confidence_breakdown']
-                            
-                            # Show metrics in a compact row
-                            conf_cols = st.columns(3)
-                            with conf_cols[0]:
-                                st.metric("Base", f"{cb.get('base', 0):.0f}%", help="From score")
-                            with conf_cols[1]:
-                                st.metric("Bonus", f"+{cb.get('agreement_bonus', 0)}%", help="Agreement")
-                            with conf_cols[2]:
-                                st.metric("Total", f"{cb.get('total', 0):.0f}%")
-                            
-                            st.caption(f"**Formula:** {cb.get('formula', 'N/A')}")
-                            
-                            # Confidence meaning with color indicator
-                            total = cb.get('total', 0)
-                            if total >= 80:
-                                st.caption("🟢 High conviction - all indicators aligned")
-                            elif total >= 60:
-                                st.caption("🟡 Moderate conviction - most indicators agree")
-                            elif total >= 40:
-                                st.caption("🟠 Low conviction - mixed signals")
+                        # COLUMN 1: Signal, Confidence, then Key Signals below
+                        with col1:
+                            if 'BUY' in signal['signal']:
+                                st.success(f"**{signal['signal']}**")
+                            elif 'SELL' in signal['signal']:
+                                st.error(f"**{signal['signal']}**")
                             else:
-                                st.caption("🔴 Very low conviction - weak signals")
-                        else:
-                            st.info("Confidence breakdown not available for bonds")
+                                st.info(f"**{signal['signal']}**")
+                            
+                            conf_help = (
+                                "**How Confidence is Calculated:**\n\n"
+                                "Base = |Score| × 15%\n"
+                                "Agreement Bonus = +10% if all indicators agree\n"
+                                "Total = Base + Bonus (max 100%)\n\n"
+                                "**Interpretation:**\n"
+                                "• 80-100%: High conviction\n"
+                                "• 60-79%: Moderate conviction\n"
+                                "• 40-59%: Low conviction\n"
+                                "• <40%: Very low conviction"
+                            )
+                            st.metric("Confidence", f"{signal['confidence']:.0f}%", help=conf_help)
+                            
+                            # Key Signals below Confidence
+                            st.markdown("---")
+                            st.markdown("**Key Signals:**")
+                            signal_list = signal.get('signals', [])
+                            if isinstance(signal_list, str):
+                                signal_list = [signal_list]
+                            elif not isinstance(signal_list, list):
+                                signal_list = []
+                            
+                            if signal_list:
+                                for sig in signal_list:
+                                    st.markdown(f"• {sig}")
+                            else:
+                                st.markdown("• No signals available")
+                        
+                        # COLUMN 2: Score, RSI, then Score Breakdown below
+                        with col2:
+                            score_help = (
+                                "**Score Range: -6 to +6**\n\n"
+                                "**Components:**\n"
+                                "• Trend: ±3 points (most important)\n"
+                                "• Momentum: ±2 points (confirms trend)\n"
+                                "• Extremes: ±1 point (timing)\n\n"
+                                "**Thresholds:**\n"
+                                "• ≥4: STRONG BUY\n"
+                                "• ≥2: BUY\n"
+                                "• -2 to +2: HOLD\n"
+                                "• ≤-2: SELL\n"
+                                "• ≤-4: STRONG SELL"
+                            )
+                            st.metric("Score", signal['score'], help=score_help)
+                            
+                            rsi_help = "Relative Strength Index (0-100)\n• <30: Oversold\n• >70: Overbought\n• 40-60: Neutral"
+                            st.metric(
+                                "RSI",
+                                f"{signal['rsi']:.1f}" if signal.get('rsi') and not pd.isna(signal['rsi']) else 'N/A',
+                                help=rsi_help
+                            )
+                            
+                            # Score Breakdown below RSI
+                            st.markdown("---")
+                            st.markdown("**📊 Score Breakdown:**")
+                            
+                            if 'score_breakdown' in signal and signal.get('score', 0) != 0:
+                                sb = signal['score_breakdown']
+                                
+                                st.markdown(f"**Trend:** {sb.get('trend', 0):+.1f} *(max ±3)*")
+                                st.markdown(f"**Momentum:** {sb.get('momentum', 0):+.1f} *(max ±2)*")
+                                st.markdown(f"**Extremes:** {sb.get('extremes', 0):+.2f} *(max ±1)*")
+                                st.markdown(f"**Total:** {sb.get('total', 0):+.1f}")
+                                
+                                st.markdown("")
+                                st.caption("**How Calculated:**")
+                                if 'computation' in sb:
+                                    for comp in sb['computation'][:3]:
+                                        st.caption(f"• {comp}")
+                                
+                                st.caption(f"**Formula:** {sb.get('formula', 'N/A')}")
+                            else:
+                                st.info("N/A for bonds")
+                        
+                        # COLUMN 3: Action, vs 200 SMA, then Confidence Breakdown below
+                        with col3:
+                            st.metric("Action", signal['action'])
+                            
+                            if signal.get('price_vs_sma200') is not None:
+                                sma_help = "Price distance from 200-day moving average\n• Positive: Above (bullish)\n• Negative: Below (bearish)"
+                                st.metric("vs 200 SMA", f"{signal['price_vs_sma200']:+.2f}%", help=sma_help)
+                            
+                            # Confidence Breakdown below vs 200 SMA
+                            st.markdown("---")
+                            st.markdown("**🎯 Confidence:**")
+                            
+                            if 'confidence_breakdown' in signal:
+                                cb = signal['confidence_breakdown']
+                                
+                                st.markdown(f"**Base:** {cb.get('base', 0):.0f}%")
+                                st.markdown(f"**Bonus:** +{cb.get('agreement_bonus', 0)}%")
+                                st.markdown(f"**Total:** {cb.get('total', 0):.0f}%")
+                                
+                                st.markdown("")
+                                st.caption(f"**Formula:** {cb.get('formula', 'N/A')}")
+                                
+                                # Interpretation
+                                total = cb.get('total', 0)
+                                if total >= 80:
+                                    st.caption("🟢 High conviction")
+                                elif total >= 60:
+                                    st.caption("🟡 Moderate conviction")
+                                elif total >= 40:
+                                    st.caption("🟠 Low conviction")
+                                else:
+                                    st.caption("🔴 Very low conviction")
+                                
+                                # Show bond reasoning if applicable
+                                if 'reasoning' in signal and signal.get('score', 0) == 0:
+                                    st.markdown("")
+                                    st.caption("**Why:**")
+                                    for reason in signal.get('reasoning', [])[:3]:
+                                        st.caption(f"• {reason}")
+                            else:
+                                st.info("N/A")
         else:
             st.info("👆 Build a portfolio first to see trading signals")
 
