@@ -368,319 +368,178 @@ def generate_trading_signal(prices, ticker=None):
 
 def generate_bond_signal(prices, ticker):
     """
-    Enhanced bond-specific logic using proper bond indicators
-    
-    Uses:
-    - Price trends and moving averages
-    - Volatility (standard deviation)
-    - Recent performance
-    - Bond-type specific logic
+    Enhanced bond logic with proper confidence levels
     """
     
     # Calculate indicators
-    sma_50 = calculate_sma(prices, 50)
     sma_200 = calculate_sma(prices, 200)
     current_price = prices.iloc[-1]
     
-    # Calculate recent returns
     if len(prices) >= 60:
         recent_60d_return = (current_price / prices.iloc[-60] - 1) * 100
     else:
         recent_60d_return = 0
     
-    if len(prices) >= 20:
-        recent_20d_return = (current_price / prices.iloc[-20] - 1) * 100
-    else:
-        recent_20d_return = 0
-    
-    # Calculate volatility (rolling 60-day)
-    if len(prices) >= 60:
-        returns = prices.pct_change()
-        volatility_60d = returns.tail(60).std() * np.sqrt(252) * 100  # Annualized
-    else:
-        volatility_60d = 0
-    
-    # Initialize signals list
     signals_list = []
     
-    # Bond type classification
-    if ticker in ['AGG', 'BND']:
-        bond_type = "Aggregate"
-        bond_category = "CORE"
-    elif ticker in ['TLT', 'IEF', 'TLH']:
-        bond_type = "Treasury"
-        bond_category = "TACTICAL"
-    elif ticker in ['SHY', 'VCSH', 'BSV', 'VGSH']:
-        bond_type = "Short-Term"
-        bond_category = "CASH_ALTERNATIVE"
+    # Bond type
+    if ticker in ['AGG', 'BND', 'LQD']:
+        bond_type = "Aggregate/Core"
+    elif ticker in ['TLT', 'IEF']:
+        bond_type = "Long-term Treasury"
     elif ticker in ['HYG', 'JNK']:
-        bond_type = "High Yield"
-        bond_category = "EQUITY_LIKE"
-    elif ticker in ['TIP']:
-        bond_type = "Inflation Protected"
-        bond_category = "INFLATION_HEDGE"
-    elif ticker in ['LQD', 'VCIT', 'BIV']:
-        bond_type = "Investment Grade Corporate"
-        bond_category = "CORE"
-    elif ticker in ['MUB']:
-        bond_type = "Municipal"
-        bond_category = "TAX_ADVANTAGED"
+        bond_type = "High Yield Corporate"
+    elif ticker in ['SHY', 'VCSH']:
+        bond_type = "Short-term"
+    elif ticker == 'TIP':
+        bond_type = "Inflation-Protected"
     else:
         bond_type = "Bond"
-        bond_category = "UNKNOWN"
     
-    signals_list.append(f"{bond_type} bond - {ticker}")
+    signals_list.append(f"{bond_type} - {ticker}")
     
-    # =============================================================================
-    # ANALYSIS COMPONENTS
-    # =============================================================================
-    
-    # Trend Analysis
-    if not pd.isna(sma_50.iloc[-1]) and not pd.isna(sma_200.iloc[-1]):
-        price_above_50 = current_price > sma_50.iloc[-1]
-        price_above_200 = current_price > sma_200.iloc[-1]
-        sma50_above_200 = sma_50.iloc[-1] > sma_200.iloc[-1]
-        
-        if price_above_50 and price_above_200 and sma50_above_200:
-            trend = "Strong Uptrend"
-            trend_bullish = True
-            signals_list.append("Strong uptrend (price rising)")
-        elif price_above_200:
-            trend = "Uptrend"
-            trend_bullish = True
-            signals_list.append("Uptrend (above 200-day average)")
-        elif not price_above_50 and not price_above_200 and not sma50_above_200:
-            trend = "Strong Downtrend"
-            trend_bullish = False
-            signals_list.append("Strong downtrend (price falling)")
-        elif not price_above_200:
-            trend = "Downtrend"
-            trend_bullish = False
-            signals_list.append("Downtrend (below 200-day average)")
+    # Price trend
+    if not pd.isna(sma_200.iloc[-1]):
+        if current_price > sma_200.iloc[-1]:
+            signals_list.append("Price above 200-day average")
         else:
-            trend = "Sideways"
-            trend_bullish = None
-            signals_list.append("Sideways trend")
-    else:
-        trend = "Unclear"
-        trend_bullish = None
-        signals_list.append("Insufficient trend data")
+            signals_list.append("Price below 200-day average")
     
-    # Recent Performance
-    if abs(recent_60d_return) >= 2:
-        direction = "up" if recent_60d_return > 0 else "down"
-        signals_list.append(f"Recent 60-day: {direction} {abs(recent_60d_return):.1f}%")
-    else:
+    # Recent performance
+    if abs(recent_60d_return) < 2:
         signals_list.append("Flat recent performance")
-    
-    # Volatility Assessment
-    if volatility_60d > 15:
-        signals_list.append(f"High volatility ({volatility_60d:.1f}%)")
-        high_vol = True
-    elif volatility_60d > 8:
-        signals_list.append(f"Moderate volatility ({volatility_60d:.1f}%)")
-        high_vol = False
     else:
-        signals_list.append(f"Low volatility ({volatility_60d:.1f}%)")
-        high_vol = False
+        signals_list.append(f"{'Up' if recent_60d_return > 0 else 'Down'} {abs(recent_60d_return):.1f}% over 60 days")
     
     # =============================================================================
-    # CATEGORY-SPECIFIC LOGIC
+    # BOND-SPECIFIC LOGIC WITH PROPER CONFIDENCE
     # =============================================================================
     
-    if bond_category == "CORE":
-        # AGG, BND, LQD - ALWAYS HOLD (diversifiers)
+    # CORE BONDS (AGG, BND, LQD) - Always HOLD with HIGH confidence
+    if ticker in ['AGG', 'BND', 'LQD']:
         signal = "HOLD"
         action = "Hold"
-        confidence = 60
-        recommendation = f"Hold {bond_type} bonds for diversification and stability."
+        confidence = 95  # HIGH - we're CERTAIN this should be held
+        recommendation = "Hold for portfolio stability. Not a trading position - this is permanent ballast."
         
         reasoning = [
-            f"{bond_type} bonds are portfolio ballast",
-            "Hold 20-40% bonds based on risk tolerance",
-            "Rebalance when stock/bond allocation drifts"
+            "Core bonds are 20-40% of balanced portfolio",
+            "Provides stability when stocks decline",
+            "Rebalance only when allocation drifts significantly",
+            "Never trade - permanent diversification holding"
         ]
     
-    elif bond_category == "TACTICAL":
-        # TLT, IEF - Trade based on interest rate outlook
+    # TACTICAL TREASURIES (TLT, IEF)
+    elif ticker in ['TLT', 'IEF']:
+        trend_positive = current_price > sma_200.iloc[-1] if not pd.isna(sma_200.iloc[-1]) else None
         
-        # Strong bullish conditions: uptrend + positive returns
-        if trend_bullish and recent_60d_return > 3 and recent_20d_return > 1:
+        if trend_positive and recent_60d_return > 3:
             signal = "BUY"
             action = "Accumulate"
             confidence = 75
-            recommendation = "Interest rates falling - bond prices rising. Tactical buy opportunity."
+            recommendation = "Interest rates falling - bond prices rising. Tactical buy."
             reasoning = [
-                "Bond prices rising (rates falling)",
-                "Use as rate hedge in 10-15% allocation",
+                "Rates declining benefits long-duration bonds",
+                "Use 10-15% allocation as rate hedge",
                 "Monitor Fed policy for reversal"
             ]
-        
-        # Moderate bullish: uptrend but weak recent returns
-        elif trend_bullish and recent_60d_return > 0:
+        elif trend_positive and recent_60d_return > 0:
             signal = "HOLD"
             action = "Hold"
-            confidence = 60
-            recommendation = "Uptrend intact but momentum weak. Hold current position."
-            reasoning = [
-                "Uptrend but slowing momentum",
-                "Wait for stronger confirmation to add",
-                "Good for rate hedging"
-            ]
-        
-        # Bearish: downtrend and negative returns
-        elif not trend_bullish and recent_60d_return < -3 and recent_20d_return < -1:
+            confidence = 65
+            recommendation = "Uptrend intact. Hold current position."
+            reasoning = ["Positive trend but watch Fed policy", "Good rate hedge"]
+        elif not trend_positive and recent_60d_return < -3:
             signal = "SELL"
             action = "Distribute"
-            confidence = 70
+            confidence = 75
             recommendation = "Interest rates rising - bond prices falling. Reduce exposure."
             reasoning = [
-                "Bond prices falling (rates rising)",
-                "High duration = high rate sensitivity",
-                "Consider shorter duration bonds"
+                "Rising rates hurt long-duration bonds",
+                "Consider shorter-duration alternatives"
             ]
-        
-        # Weak bearish or mixed
         else:
             signal = "HOLD"
             action = "Hold"
             confidence = 50
-            recommendation = "Mixed signals. Hold current allocation or wait for clarity."
-            reasoning = [
-                "Unclear trend direction",
-                "Monitor Fed policy and rate expectations",
-                "Avoid adding until trend clarifies"
-            ]
+            recommendation = "Mixed signals. Hold or wait for clarity."
+            reasoning = ["Unclear rate direction"]
     
-    elif bond_category == "CASH_ALTERNATIVE":
-        # SHY, VCSH - Always hold (cash substitute)
-        signal = "HOLD"
-        action = "Hold"
-        confidence = 65
-        recommendation = "Short-term bonds as cash alternative. Minimal rate risk."
+    # HIGH YIELD (HYG, JNK) - Trade like stocks
+    elif ticker in ['HYG', 'JNK']:
+        trend_positive = current_price > sma_200.iloc[-1] if not pd.isna(sma_200.iloc[-1]) else None
         
-        reasoning = [
-            "Short duration = minimal volatility",
-            "Use for cash allocation (emergency fund)",
-            "Good when rates rising"
-        ]
-    
-    elif bond_category == "EQUITY_LIKE":
-        # HYG, JNK - Trade like stocks (high volatility)
-        
-        # Strong bullish: uptrend + strong returns + low volatility spike
-        if trend_bullish and recent_60d_return > 5 and recent_20d_return > 1.5 and not high_vol:
+        if trend_positive and recent_60d_return > 5:
             signal = "BUY"
             action = "Accumulate"
             confidence = 70
-            recommendation = "High yield strong - credit spreads tightening. Risk-on environment."
+            recommendation = "High yield strong - credit spreads tight. Risk-on."
             reasoning = [
-                "Credit spreads tightening (economy strong)",
-                "High yield performs well in bull markets",
+                "Strong economy = tight credit spreads",
                 "Limit to 5-10% allocation (still risky)"
             ]
-        
-        # Moderate bullish
-        elif trend_bullish and recent_60d_return > 2:
-            signal = "HOLD"
-            action = "Hold"
-            confidence = 60
-            recommendation = "High yield performing well. Hold current position."
-            reasoning = [
-                "Positive trend but watch for reversal",
-                "High yield correlates with stocks (~0.70)",
-                "Monitor economic indicators"
-            ]
-        
-        # Bearish: downtrend + negative returns OR high volatility spike
-        elif (not trend_bullish and recent_60d_return < -3) or (high_vol and volatility_60d > 20):
+        elif not trend_positive and recent_60d_return < -3:
             signal = "SELL"
             action = "Distribute"
             confidence = 80
-            recommendation = "High yield weakness - recession risk or credit stress. Exit position."
+            recommendation = "High yield weakness - recession risk. Exit."
             reasoning = [
-                "Credit spreads widening (recession risk)",
-                "High yield crashes in recessions (-20% to -30%)",
-                "Switch to quality bonds (AGG, TLT)"
+                "Widening credit spreads signal recession",
+                "High yield crashes in downturns (-20% to -30%)",
+                "Switch to quality bonds (AGG/TLT)"
             ]
-        
-        # Mixed signals
         else:
             signal = "HOLD"
             action = "Hold"
-            confidence = 50
-            recommendation = "Mixed signals. Monitor for clear trend."
-            reasoning = [
-                "High yield is volatile - wait for clarity",
-                "Watch credit spreads and economic data",
-                "Can reverse quickly"
-            ]
+            confidence = 55
+            recommendation = "Monitor for clear trend."
+            reasoning = ["High yield is volatile - wait for clarity"]
     
-    elif bond_category == "INFLATION_HEDGE":
-        # TIP - Hold for inflation protection
-        
-        if recent_60d_return > 3 and trend_bullish:
+    # SHORT-TERM (SHY) - Always HOLD with moderate-high confidence
+    elif ticker in ['SHY', 'VCSH']:
+        signal = "HOLD"
+        action = "Hold"
+        confidence = 85  # High - minimal uncertainty
+        recommendation = "Short-term bonds as cash alternative. Minimal rate risk."
+        reasoning = [
+            "Short duration = minimal volatility",
+            "Use for cash allocation",
+            "Good when rates rising"
+        ]
+    
+    # TIPS (Inflation-protected)
+    elif ticker == 'TIP':
+        if recent_60d_return > 3:
             signal = "BUY"
             action = "Accumulate"
             confidence = 65
-            recommendation = "Inflation expectations rising. TIPS provide real yield protection."
-            reasoning = [
-                "Principal adjusts with CPI inflation",
-                "Use 10-15% allocation in inflationary periods",
-                "Better than nominal bonds when inflation rising"
-            ]
+            recommendation = "Inflation expectations rising. TIPS provide protection."
+            reasoning = ["Principal adjusts with CPI", "Use 10-15% in inflationary periods"]
         else:
             signal = "HOLD"
             action = "Hold"
-            confidence = 60
-            recommendation = "Hold TIPS for inflation protection."
-            reasoning = [
-                "Real yield protection from inflation",
-                "Useful hedge in uncertain inflation environment",
-                "Underperforms when inflation stable/falling"
-            ]
+            confidence = 75  # High confidence for holding
+            recommendation = "Hold for inflation protection."
+            reasoning = ["Real yield protection", "Hedge for inflation uncertainty"]
     
-    elif bond_category == "TAX_ADVANTAGED":
-        # MUB - Municipal bonds
-        signal = "HOLD"
-        action = "Hold"
-        confidence = 60
-        recommendation = "Municipal bonds for tax-advantaged income (if in high tax bracket)."
-        
-        reasoning = [
-            "Tax-free interest for federal (sometimes state) taxes",
-            "Best for taxable accounts in high tax brackets",
-            "Equivalent taxable yield depends on tax rate"
-        ]
-    
+    # Default
     else:
-        # Unknown bond type - conservative
         signal = "HOLD"
         action = "Hold"
-        confidence = 55
+        confidence = 70
         recommendation = "Hold for bond allocation."
-        reasoning = ["Insufficient data for this bond type"]
-    
-    # =============================================================================
-    # RETURN RESULTS
-    # =============================================================================
+        reasoning = ["Bond allocation for diversification"]
     
     return {
         'signal': signal,
         'action': action,
-        'score': 0,  # Bonds don't use scoring
+        'score': 0,
         'score_breakdown': {
-            'formula': f'{bond_type} bonds use different logic (not scored)',
-            'computation': [
-                f"Category: {bond_category}",
-                f"Trend: {trend}",
-                f"60-day return: {recent_60d_return:+.1f}%",
-                f"Volatility: {volatility_60d:.1f}%"
-            ]
+            'formula': f'{bond_type} bonds - not scored (use different logic)',
         },
         'confidence': confidence,
         'confidence_breakdown': {
-            'formula': f'Based on {bond_type} bond-specific factors',
+            'formula': f'Confidence based on certainty of {signal} recommendation',
             'base': confidence,
             'agreement_bonus': 0,
             'total': confidence
@@ -691,14 +550,8 @@ def generate_bond_signal(prices, ticker):
         'rsi': None,
         'macd': None,
         'macd_signal': None,
-        'price_vs_sma50': ((current_price / sma_50.iloc[-1]) - 1) * 100 if not pd.isna(sma_50.iloc[-1]) else None,
-        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None,
-        'bond_metrics': {
-            'recent_60d_return': recent_60d_return,
-            'recent_20d_return': recent_20d_return,
-            'volatility_60d': volatility_60d,
-            'trend': trend
-        }
+        'price_vs_sma50': None,
+        'price_vs_sma200': ((current_price / sma_200.iloc[-1]) - 1) * 100 if not pd.isna(sma_200.iloc[-1]) else None
     }
 
 
