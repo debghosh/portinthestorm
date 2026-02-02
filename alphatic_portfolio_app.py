@@ -2267,6 +2267,8 @@ end_date = st.sidebar.date_input(
     value=datetime.now()
 )
 
+
+
 # Build Portfolio Button
 if st.sidebar.button("🚀 Build Portfolio", type="primary"):
     if not tickers_list:
