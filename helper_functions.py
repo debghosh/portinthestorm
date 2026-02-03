@@ -2052,38 +2052,57 @@ def plot_regime_chart(regimes, returns):
     ax1.set_ylabel('Cumulative Return', fontsize=12, fontweight='bold')
     ax1.set_title('Portfolio Performance Across Market Regimes', 
                   fontsize=16, fontweight='bold', pad=20)
-    ax1.legend(loc='best', frameon=True, shadow=True)
     ax1.grid(True, alpha=0.3, linestyle='--')
     ax1.set_facecolor('#f8f9fa')
     
-    # Plot regimes as colored background
+    # Plot regimes as colored background on top chart
+    # Track which regimes actually appear in the data for legend
+    regimes_present = set()
     for regime, color in regime_colors.items():
         mask = regimes == regime
         if mask.any():
+            regimes_present.add(regime)
             ax1.fill_between(returns.index, 0, 1, where=mask, 
                             transform=ax1.get_xaxis_transform(),
-                            alpha=0.2, color=color, label=regime)
+                            alpha=0.2, color=color)
     
-    # Create regime timeline
+    # Add portfolio line to legend
+    ax1.legend(['Portfolio Value'], loc='upper left', frameon=True, shadow=True)
+    
+    # Create regime timeline on bottom chart
+    # Use a categorical approach instead of numeric
     regime_numeric = pd.Series(index=regimes.index, dtype=float)
     regime_map = {regime: i for i, regime in enumerate(regime_colors.keys())}
     for regime, value in regime_map.items():
         regime_numeric[regimes == regime] = value
     
-    ax2.plot(regime_numeric.index, regime_numeric.values, linewidth=0)
+    # Plot filled areas for each regime
     for regime, color in regime_colors.items():
         mask = regimes == regime
         if mask.any():
-            ax2.fill_between(regimes.index, 0, 5, where=mask,
-                            alpha=0.6, color=color, label=regime)
+            ax2.fill_between(regimes.index, 0, 1, where=mask,
+                            alpha=0.7, color=color, label=regime)
     
-    ax2.set_yticks(range(len(regime_colors)))
-    ax2.set_yticklabels(list(regime_colors.keys()))
+    # Remove Y-axis ticks and labels from timeline (they were confusing)
+    ax2.set_yticks([])
+    ax2.set_ylabel('')
     ax2.set_xlabel('Date', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Market Regime', fontsize=12, fontweight='bold')
-    ax2.set_title('Market Regime Classification', fontsize=14, fontweight='bold')
+    ax2.set_title('Market Regime Timeline', fontsize=14, fontweight='bold')
     ax2.grid(True, alpha=0.3, linestyle='--', axis='x')
     ax2.set_facecolor('#f8f9fa')
+    
+    # Add legend showing all regimes with their colors
+    # Only show regimes that actually appear in the data
+    handles = []
+    labels = []
+    for regime, color in regime_colors.items():
+        if regime in regimes_present:
+            handles.append(plt.Rectangle((0,0),1,1, fc=color, alpha=0.7))
+            labels.append(regime)
+    
+    # Place legend below the chart
+    ax2.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.15),
+              ncol=3, frameon=True, shadow=True, fontsize=10)
     
     fig.patch.set_facecolor('white')
     plt.tight_layout()
