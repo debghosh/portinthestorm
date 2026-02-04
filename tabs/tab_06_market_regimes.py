@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+import seaborn as sns
 from helper_functions import *
 
 
@@ -36,10 +37,23 @@ def render(tab6, portfolio_returns, prices, weights, tickers, metrics, current):
                 regimes = detect_market_regimes(portfolio_returns, lookback=60)
                 regime_stats = analyze_regime_performance(portfolio_returns, regimes)
             
+            # Show diagnostic info about data source
+            if 'end_date' in current:
+                portfolio_end_date = current['end_date']
+                st.info(f"📅 Regime analysis based on portfolio data through: **{portfolio_end_date.strftime('%Y-%m-%d')}**")
+            
             # Current Regime
             st.markdown("---")
             st.markdown("### 🎯 Current Market Regime")
             current_regime = regimes.iloc[-1]
+            
+            # Calculate current metrics for transparency
+            lookback = 60
+            recent_returns = portfolio_returns.iloc[-lookback:]
+            rolling_return_annual = recent_returns.mean() * 252
+            rolling_vol_annual = recent_returns.std() * np.sqrt(252)
+            all_vol = portfolio_returns.rolling(lookback).std() * np.sqrt(252)
+            vol_median = all_vol.median()
             
             regime_colors = {
                 'Bull Market (Low Vol)': '#28a745',
@@ -95,25 +109,76 @@ def render(tab6, portfolio_returns, prices, weights, tickers, metrics, current):
                 </div>
             """, unsafe_allow_html=True)
             
+            # Show regime classification metrics
+            st.markdown("#### 🔬 Regime Classification Details (Last 60 Days)")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Rolling Return (Annual)", 
+                    f"{rolling_return_annual:.2%}",
+                    help="Average return over last 60 days, annualized. >2% = Bull, <-2% = Bear"
+                )
+            
+            with col2:
+                st.metric(
+                    "Rolling Volatility (Annual)", 
+                    f"{rolling_vol_annual:.2%}",
+                    help=f"Volatility over last 60 days, annualized. Median: {vol_median:.2%}"
+                )
+            
+            with col3:
+                vol_status = "High" if rolling_vol_annual > vol_median else "Low"
+                st.metric(
+                    "Volatility Level",
+                    vol_status,
+                    help=f"Compared to historical median ({vol_median:.2%})"
+                )
+            
+            with col4:
+                # Calculate Sharpe ratio for last 60 days
+                sharpe_60d = (rolling_return_annual - 0.02) / rolling_vol_annual if rolling_vol_annual > 0 else 0
+                st.metric(
+                    "Sharpe Ratio (60d)",
+                    f"{sharpe_60d:.2f}",
+                    help="Risk-adjusted return. >1 is good, >2 is excellent"
+                )
+            
+            st.caption(f"**Regime Logic:** Return={rolling_return_annual:.2%} ({'positive' if rolling_return_annual > 0.02 else 'negative' if rolling_return_annual < -0.02 else 'neutral'}) + Volatility={vol_status} → {current_regime}")
+            
             # Regime Timeline
             st.markdown("---")
-            st.markdown("### 📊 Regime Timeline & Performance")
+            st.markdown("### 📊 Portfolio Performance: Return & Risk with Market Regimes")
             fig = plot_regime_chart(regimes, portfolio_returns)
             st.pyplot(fig)
             
-            # Regime timeline interpretation
+            # Regime chart interpretation
             st.markdown("""
                 <div class="interpretation-box">
-                    <div class="interpretation-title">💡 How to Read the Regime Chart</div>
-                    <p><strong>Top Chart:</strong> Your portfolio value with colored backgrounds showing regimes</p>
-                    <p><strong>Bottom Chart:</strong> Timeline of regime changes</p>
-                    <p><strong>Key Insights to Look For:</strong></p>
+                    <div class="interpretation-title">💡 How to Read This Chart</div>
+                    <p><strong>Black Line (Left Axis):</strong> Your portfolio cumulative returns over time</p>
+                    <p><strong>Red Dashed Line (Right Axis):</strong> Rolling 60-day volatility (annualized) - your risk level</p>
+                    <p><strong>Colored Backgrounds:</strong> Market regime during each period (high contrast for clarity)</p>
                     <ul>
-                        <li><strong>Big gains in green zones:</strong> Portfolio is working as designed</li>
-                        <li><strong>Losses in red zones:</strong> Expected, but how bad compared to benchmark?</li>
-                        <li><strong>Flat in yellow zones:</strong> Your capital is idle - frustrating but safe</li>
-                        <li><strong>Quick regime switches:</strong> Market is uncertain, be careful</li>
-                        <li><strong>Long red zones:</strong> True bear markets - historical best buying opportunity</li>
+                        <li><strong>🟢 Bright Green:</strong> Bull (Low Vol) - Best conditions, steady gains with low stress</li>
+                        <li><strong>🔵 Bright Blue:</strong> Bull (High Vol) - Gains with volatility, bumpy ride up</li>
+                        <li><strong>🟡 Bright Yellow:</strong> Sideways - Range-bound, capital idle</li>
+                        <li><strong>🟠 Bright Orange:</strong> Bear (Low Vol) - Slow decline, early warning</li>
+                        <li><strong>🔴 Bright Red:</strong> Bear (High Vol) - Crisis mode, steep losses</li>
+                    </ul>
+                    <p><strong>Key Insights - Return vs Risk:</strong></p>
+                    <ul>
+                        <li><strong>Black line rises + Red line low:</strong> Perfect! Making money with low stress</li>
+                        <li><strong>Black line rises + Red line high:</strong> Volatile gains - can you handle the swings?</li>
+                        <li><strong>Black line flat + Red line high:</strong> Worst scenario - high stress, no gains</li>
+                        <li><strong>Black line falls + Red line spikes:</strong> Crisis - but spikes are temporary</li>
+                        <li><strong>Risk adjusts return perspective:</strong> 10% return with 5% vol beats 15% return with 25% vol</li>
+                    </ul>
+                    <p><strong>🎯 Investment Decisions:</strong></p>
+                    <ul>
+                        <li><strong>Green zones + low volatility:</strong> Maximize position sizes, compound gains</li>
+                        <li><strong>Red zones + volatility spikes:</strong> Historical buying opportunities, stay disciplined</li>
+                        <li><strong>High returns + high volatility:</strong> Consider reducing position size for same risk-adjusted return</li>
                     </ul>
                 </div>
             """, unsafe_allow_html=True)
@@ -361,11 +426,6 @@ def render(tab6, portfolio_returns, prices, weights, tickers, metrics, current):
             }
             
             # Prepare data for heatmap
-            import pandas as pd
-            import numpy as np
-            import seaborn as sns
-            import matplotlib.pyplot as plt
-            
             sleeves = ['Total Market', 'Growth', 'Dividend', 'Factors', 'Bonds']
             periods = list(historical_regimes.keys())
             

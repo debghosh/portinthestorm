@@ -2029,80 +2029,86 @@ def plot_rolling_metrics(returns, window=60, title='Rolling Metrics'):
 
 def plot_regime_chart(regimes, returns):
     """
-    Plot market regime timeline with returns
+    Plot market regime timeline with returns AND risk
+    Dual-axis: Left = Cumulative Return, Right = Rolling Volatility
     """
     # Ensure returns is a Series
     if isinstance(returns, pd.DataFrame):
         returns = returns.iloc[:, 0]
     
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+    fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
     
-    # Color map for regimes
+    # HIGH CONTRAST Color map for regimes
     regime_colors = {
-        'Bull Market (Low Vol)': '#28a745',
-        'Bull Market (High Vol)': '#17a2b8',
-        'Sideways/Choppy': '#ffc107',
-        'Bear Market (Low Vol)': '#fd7e14',
-        'Bear Market (High Vol)': '#dc3545'
+        'Bull Market (Low Vol)': '#00C851',      # Bright green
+        'Bull Market (High Vol)': '#007bff',     # Bright blue
+        'Sideways/Choppy': '#ffbb33',            # Bright yellow/orange
+        'Bear Market (Low Vol)': '#ff8800',      # Bright orange
+        'Bear Market (High Vol)': '#ff4444'      # Bright red
     }
     
-    # Plot returns
+    # Calculate cumulative returns and rolling volatility
     cum_returns = (1 + returns).cumprod()
-    cum_returns.plot(ax=ax1, linewidth=2, color='#667eea', label='Portfolio Value')
-    ax1.set_ylabel('Cumulative Return', fontsize=12, fontweight='bold')
-    ax1.set_title('Portfolio Performance Across Market Regimes', 
-                  fontsize=16, fontweight='bold', pad=20)
-    ax1.grid(True, alpha=0.3, linestyle='--')
-    ax1.set_facecolor('#f8f9fa')
+    rolling_vol = returns.rolling(60).std() * np.sqrt(252) * 100  # Annualized, as percentage
     
-    # Plot regimes as colored background on top chart
-    # Track which regimes actually appear in the data for legend
+    # Get the full Y-axis range for returns
+    y_min = cum_returns.min() * 0.95
+    y_max = cum_returns.max() * 1.05
+    
+    # Plot regime backgrounds FIRST (behind everything) - FULL HEIGHT
     regimes_present = set()
     for regime, color in regime_colors.items():
         mask = regimes == regime
         if mask.any():
             regimes_present.add(regime)
-            ax1.fill_between(returns.index, 0, 1, where=mask, 
-                            transform=ax1.get_xaxis_transform(),
-                            alpha=0.2, color=color)
+            # Fill from bottom to top of the ENTIRE chart
+            ax1.fill_between(returns.index, y_min, y_max, 
+                           where=mask, alpha=0.25, color=color,
+                           zorder=1)  # Behind everything
     
-    # Add portfolio line to legend
-    ax1.legend(['Portfolio Value'], loc='upper left', frameon=True, shadow=True)
+    # Plot cumulative returns (LEFT Y-AXIS)
+    line1 = ax1.plot(cum_returns.index, cum_returns.values, linewidth=3, 
+                     color='#000000', label='Portfolio Value', zorder=10)
     
-    # Create regime timeline on bottom chart
-    # Use a categorical approach instead of numeric
-    regime_numeric = pd.Series(index=regimes.index, dtype=float)
-    regime_map = {regime: i for i, regime in enumerate(regime_colors.keys())}
-    for regime, value in regime_map.items():
-        regime_numeric[regimes == regime] = value
+    ax1.set_ylabel('Cumulative Return', fontsize=13, fontweight='bold', color='#000000')
+    ax1.set_xlabel('Date', fontsize=13, fontweight='bold')
+    ax1.set_ylim(y_min, y_max)
+    ax1.tick_params(axis='y', labelcolor='#000000')
+    ax1.grid(True, alpha=0.3, linestyle='--', zorder=2)
+    ax1.set_facecolor('#ffffff')
     
-    # Plot filled areas for each regime
-    for regime, color in regime_colors.items():
-        mask = regimes == regime
-        if mask.any():
-            ax2.fill_between(regimes.index, 0, 1, where=mask,
-                            alpha=0.7, color=color, label=regime)
+    # Create second Y-axis for VOLATILITY (RIGHT Y-AXIS)
+    ax2 = ax1.twinx()
+    line2 = ax2.plot(rolling_vol.index, rolling_vol.values, linewidth=2.5,
+                     color='#dc3545', label='Rolling Volatility (60d)', 
+                     linestyle='--', alpha=0.8, zorder=9)
     
-    # Remove Y-axis ticks and labels from timeline (they were confusing)
-    ax2.set_yticks([])
-    ax2.set_ylabel('')
-    ax2.set_xlabel('Date', fontsize=12, fontweight='bold')
-    ax2.set_title('Market Regime Timeline', fontsize=14, fontweight='bold')
-    ax2.grid(True, alpha=0.3, linestyle='--', axis='x')
-    ax2.set_facecolor('#f8f9fa')
+    ax2.set_ylabel('Rolling Volatility (Annualized %)', fontsize=13, fontweight='bold', color='#dc3545')
+    ax2.tick_params(axis='y', labelcolor='#dc3545')
     
-    # Add legend showing all regimes with their colors
-    # Only show regimes that actually appear in the data
-    handles = []
-    labels = []
+    # Title
+    ax1.set_title('Portfolio Performance: Return & Risk Across Market Regimes', 
+                 fontsize=16, fontweight='bold', pad=20)
+    
+    # Create comprehensive legend
+    # Portfolio and volatility lines
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    
+    # Add spacer
+    lines.append(plt.Line2D([0], [0], linewidth=0))
+    labels.append('Market Regimes:')
+    
+    # Add regime colors (only those present)
     for regime, color in regime_colors.items():
         if regime in regimes_present:
-            handles.append(plt.Rectangle((0,0),1,1, fc=color, alpha=0.7))
+            lines.append(plt.Rectangle((0,0),1,1, fc=color, alpha=0.4, ec='none'))
             labels.append(regime)
     
-    # Place legend below the chart
-    ax2.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.15),
-              ncol=3, frameon=True, shadow=True, fontsize=10)
+    # Place legend
+    ax1.legend(lines, labels, loc='upper left', 
+              frameon=True, shadow=True, fontsize=9, ncol=1,
+              fancybox=True, framealpha=0.95)
     
     fig.patch.set_facecolor('white')
     plt.tight_layout()
